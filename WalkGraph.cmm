@@ -6,12 +6,16 @@ Serializze_encodeObject (W_ a, W_ st)
   clos = UNTAG(a);
   info = %GET_STD_INFO(clos);
   type = TO_W_(%INFO_TYPE(info));
+  (W_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, %ENTRY_CODE(clos), st);
+
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {
     default:
     {
-      (W_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (clos, type, st);
+      (W_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, st);
 
+    default:
+    {
       W_ ptrs;
       ptrs = TO_W_(%INFO_PTRS(info));
       jump Serializze_dumpPtrs (clos, 0, ptrs, stx);
@@ -22,7 +26,7 @@ Serializze_encodeObject (W_ a, W_ st)
 Serializze_dumpPtrs (W_ clos, W_ p, W_ lim, W_ st)
 {
   if (p < lim) {
-    (W_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (clos, StgClosure_payload(clos, p), st);
+    (W_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, StgClosure_payload(clos, p), st);
     jump Serializze_dumpPtrs (clos, p + 1, lim, stx);
   } else {
     W_ info, nptrs;
@@ -35,9 +39,9 @@ Serializze_dumpPtrs (W_ clos, W_ p, W_ lim, W_ st)
 Serializze_dumpNPtrs (W_ clos, W_ p, W_ lim, W_ st)
 {
   if (p < lim) {
-    (W_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (clos, StgClosure_payload(clos, p), st);
+    (W_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_info, StgClosure_payload(clos, p), st);
     jump Serializze_dumpNPtrs (clos, p + 1, lim, stx);
   } else {
-    jump %ENTRY_CODE(Serializze_popTag_info) (clos, st);
+    jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, st);
   }
 }

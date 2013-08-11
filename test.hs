@@ -1,23 +1,10 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
-{-# LANGUAGE GHCForeignImportPrim #-}
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UnboxedTuples  #-}
-{-# LANGUAGE UnliftedFFITypes #-}
+import Serialize
+import Data.Map.Lazy as Map
 
-import GHC.Prim
-import GHC.Int
-import GHC.Word
-import GHC.Ptr
-import Unsafe.Coerce
-
-foreign import prim "Serializze_encodeObject" blah :: Any -> Any -> (# Any #)
-
-encodeObject :: forall a st . a -> st -> st
-encodeObject val st =
-  case blah (unsafeCoerce val :: Any) (unsafeCoerce st :: Any) of
-    (# res #) -> unsafeCoerce res :: st
+data Test = Test Int Int
 
 main :: IO ()
 main = do
-  print (encodeObject (10 :: Int) (20 :: Int))
+  -- print (encodeObject (10 :: Int) (20 :: Int))
+  let st = EncodedState Map.empty
+  print (encodeObject (Test 11 17) st)
