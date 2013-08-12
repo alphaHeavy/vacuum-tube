@@ -37,11 +37,12 @@ pushTag :: Word# -> Addr# -> EncodedState -> EncodedState
 pushTag tag entryCode x = traceShow ("push", W# tag, Ptr entryCode) x
 
 yieldPtr :: Addr# -> EncodedState -> EncodedState
-yieldPtr ptr (EncodedState st) =
-  let p = Ptr ptr
-      st' = Map.insert p (0 :: Int) st
-      st'' = encodeObject p (EncodedState st')
-  in traceShow ("ptr", p) st''
+yieldPtr ptr es@(EncodedState st) | traceShow ("ptr", Ptr ptr) True =
+  let combiner _ v _ = v
+      p = Ptr ptr
+  in case Map.insertLookupWithKey combiner p (0 :: Int) st of
+    (Just _,  _  ) -> es
+    (Nothing, st') -> encodeObject p (EncodedState st')
 
 yieldNPtr :: Word# -> EncodedState -> EncodedState
 yieldNPtr val x = traceShow ("nptr", W# val) x
