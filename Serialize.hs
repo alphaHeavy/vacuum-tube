@@ -42,7 +42,7 @@ yieldPtr ptr es@(EncodedState st) | traceShow ("ptr", Ptr ptr) True =
       p = Ptr ptr
   in case Map.insertLookupWithKey combiner p (0 :: Int) st of
     (Just _,  _  ) -> es
-    (Nothing, st') -> encodeObject p (EncodedState st')
+    (Nothing, st') -> encodeObject ptr (EncodedState st')
 
 yieldNPtr :: Word# -> EncodedState -> EncodedState
 yieldNPtr val x = traceShow ("nptr", W# val) x
