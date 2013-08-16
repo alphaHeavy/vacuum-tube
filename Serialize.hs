@@ -9,19 +9,29 @@
 module Serialize where
 
 import GHC.Prim
-import GHC.Int
 import GHC.Word
 import GHC.Ptr
+import Data.Monoid (mappend)
 import Debug.Trace
 import Data.Map.Lazy as Map
+import Data.Set as Set
 
-data Void
+import Data.ByteString (ByteString)
+import Control.Monad.ST
+
+data Closure
+
+instance Show Closure where
+  show _ = "Void"
+
+data InfoTable
+
+data Payload = PtrPayload (Ptr Closure) | NPtrPayload Word
+  deriving (Eq, Ord, Show)
 
 -- newtype EncodedState = EncodedState (Map (Ptr Void) Any)
-newtype EncodedState = EncodedState (Map (Ptr Void) Int)
-
-instance Show EncodedState where
-  show (EncodedState m) = show $ Map.keys m
+data EncodedState = EncodedState [Ptr Closure] (Map (Ptr Closure) (Set Payload))
+  deriving Show
 
 foreign import prim "Serializze_encodeObject" unsafeEncodeObject :: Any -> Any -> (# Any #)
 
@@ -31,18 +41,26 @@ encodeObject val st =
     (# res #) -> unsafeCoerce# res :: EncodedState
 
 popTag :: EncodedState -> EncodedState
-popTag x = trace "pop" x
+popTag (EncodedState (_:stack) st) =
+  trace "pop" (EncodedState stack st)
 
 pushTag :: Word# -> Addr# -> EncodedState -> EncodedState
-pushTag tag entryCode x = traceShow ("push", W# tag, Ptr entryCode) x
+pushTag tag entryCode (EncodedState stack st) =
+  traceShow ("push", W# tag, Ptr entryCode)
+  (EncodedState (Ptr entryCode:stack) st)
 
 yieldPtr :: Addr# -> EncodedState -> EncodedState
-yieldPtr ptr es@(EncodedState st) | traceShow ("ptr", Ptr ptr) True =
-  let combiner _ v _ = v
-      p = Ptr ptr
-  in case Map.insertLookupWithKey combiner p (0 :: Int) st of
-    (Just _,  _  ) -> es
-    (Nothing, st') -> encodeObject ptr (EncodedState st')
+yieldPtr ptr (EncodedState stack@(top:_) st) | traceShow ("ptr", Ptr ptr) True =
+  let ptr' = Ptr ptr
+      payload = PtrPayload ptr'
+      addr = unsafeCoerce# ptr :: Any
+      insertPayload
+        | Map.member ptr' st' = EncodedState stack st'
+        | otherwise = encodeObject addr (EncodedState stack (Map.insertWith mappend ptr' Set.empty st'))
+        where st' = Map.insertWith mappend top (Set.singleton payload) st
+
+  in insertPayload
 
 yieldNPtr :: Word# -> EncodedState -> EncodedState
-yieldNPtr val x = traceShow ("nptr", W# val) x
+yieldNPtr val (EncodedState stack@(top:_) st) = traceShow ("nptr", W# val)
+  (EncodedState stack (Map.insertWith mappend top (Set.singleton (NPtrPayload (W# val))) st))

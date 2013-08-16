@@ -10,13 +10,6 @@ Serializze_encodeObject (P_ a, P_ st)
 
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {
-    case FUN_STATIC:
-    {
-      W_ finfo;
-      finfo = %FUN_INFO(info);
-      jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, stx);
-    }
-
     default:
     {
       W_ ptrs;
