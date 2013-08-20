@@ -36,7 +36,7 @@ data Payload
     deriving (Eq, Ord, Show)
 
 -- newtype EncodedState = EncodedState (Map (Ptr Void) Any)
-data EncodedState = EncodedState [Ptr Closure] (Map (Ptr Closure) (Set Payload))
+data EncodedState = EncodedState [(Tag, Ptr InfoTable, Ptr Closure)] (Map (Ptr Closure) (Map Word Payload))
   deriving Show
 
 foreign import prim "Serializze_encodeObject" unsafeEncodeObject :: Any -> Any -> (# Any #)
@@ -50,32 +50,31 @@ popTag :: EncodedState -> EncodedState
 popTag (EncodedState (_:stack) st) =
   trace "pop" (EncodedState stack st)
 
-pushTag :: Word# -> Addr# -> EncodedState -> EncodedState
-pushTag tag entryCode (EncodedState stack st) =
-  traceShow ("push", W# tag, Ptr entryCode)
-  (EncodedState (Ptr entryCode:stack) st)
+pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+pushTag tag infoTable entryCode (EncodedState stack st) =
+  traceShow ("push", W# tag, Ptr infoTable, Ptr entryCode)
+  (EncodedState ((W# tag, Ptr infoTable, Ptr entryCode):stack) st)
 
-yieldPtr :: Addr# -> EncodedState -> EncodedState
-yieldPtr ptr (EncodedState stack@(top:_) st) | traceShow ("ptr", Ptr ptr) True =
+yieldPtr :: Word# -> Addr# -> EncodedState -> EncodedState
+yieldPtr slot ptr (EncodedState stack@((_, _, top):_) st) | traceShow ("ptr", Ptr ptr) True =
   let ptr' = Ptr ptr
       payload = PtrPayload ptr'
       addr = unsafeCoerce# ptr :: Any
       insertPayload
         | Map.member ptr' st' = EncodedState stack st'
-        | otherwise = encodeObject addr (EncodedState stack (Map.insertWith mappend ptr' Set.empty st'))
-        where st' = Map.insertWith mappend top (Set.singleton payload) st
+        | otherwise = encodeObject addr (EncodedState stack (Map.insertWith mappend ptr' Map.empty st'))
+        where st' = Map.insertWith mappend top (Map.singleton (W# slot) payload) st
 
   in insertPayload
 
-yieldNPtr :: Word# -> EncodedState -> EncodedState
-yieldNPtr val (EncodedState stack@(top:_) st) = traceShow ("nptr", W# val)
-  (EncodedState stack (Map.insertWith mappend top (Set.singleton (NPtrPayload (W# val))) st))
+yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
+yieldNPtr slot val (EncodedState stack@((_, _, top):_) st) = traceShow ("nptr", W# val)
+  (EncodedState stack (Map.insertWith mappend top (Map.singleton (W# slot) (NPtrPayload (W# val))) st))
 
-yieldArrWords :: ByteArray# -> EncodedState -> EncodedState
-yieldArrWords arr (EncodedState stack@(top:_) st) =
-  let bytes  = sizeofByteArray# arr
-      bytes' = fromIntegral $ I# bytes
-      uarray = UArray 1 bytes' (fromIntegral bytes') arr
-      set'   = Set.singleton (ArrayPayload uarray)
-  in traceShow ("bytes", bytes', Ptr (unsafeCoerce# arr))
+yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
+yieldArrWords slot arr (EncodedState stack@((_, _, top):_) st) =
+  let bytes  = fromIntegral $ I# (sizeofByteArray# arr)
+      uarray = UArray 1 bytes (fromIntegral bytes) arr
+      set'   = Map.singleton (W# slot) (ArrayPayload uarray)
+  in traceShow ("bytes", bytes, Ptr (unsafeCoerce# arr))
   (EncodedState stack (Map.insertWith mappend top set' st))

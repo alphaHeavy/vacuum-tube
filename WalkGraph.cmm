@@ -6,13 +6,13 @@ Serializze_encodeObject (P_ a, P_ st)
   clos = UNTAG(a);
   info = %GET_STD_INFO(clos);
   type = TO_W_(%INFO_TYPE(info));
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, clos, st);
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
 
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {
     case ARR_WORDS:
     {
-      jump %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, clos, stx);
+      jump %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, 0, clos, stx);
     }
 
     default:
@@ -28,7 +28,7 @@ Serializze_dumpPtrs (P_ clos, W_ p, W_ lim, P_ st)
 {
   if (p < lim)
   {
-    (P_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, UNTAG(StgClosure_payload(clos, p)), st);
+    (P_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, p, UNTAG(StgClosure_payload(clos, p)), st);
     jump Serializze_dumpPtrs (clos, p + 1, lim, stx);
   }
   else
@@ -44,7 +44,7 @@ Serializze_dumpNPtrs (P_ clos, W_ p, W_ lim, P_ st)
 {
   if (p < lim)
   {
-    (P_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_info, StgClosure_payload(clos, p), st);
+    (P_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_info, p, StgClosure_payload(clos, p), st);
     jump Serializze_dumpNPtrs (clos, p + 1, lim, stx);
   }
   else
