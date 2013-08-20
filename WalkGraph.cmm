@@ -10,6 +10,11 @@ Serializze_encodeObject (P_ a, P_ st)
 
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {
+    case ARR_WORDS:
+    {
+      jump %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, clos, stx);
+    }
+
     default:
     {
       W_ ptrs;

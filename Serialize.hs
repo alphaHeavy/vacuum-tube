@@ -9,15 +9,18 @@
 module Serialize where
 
 import GHC.Prim
+import GHC.Types
 import GHC.Word
 import GHC.Ptr
-import Data.Monoid (mappend)
-import Debug.Trace
 import Data.Map.Lazy as Map
+import Data.Monoid (mappend)
 import Data.Set as Set
+import Data.Word
+import Debug.Trace
 
 import Data.ByteString (ByteString)
 import Control.Monad.ST
+import Data.Array.Base
 
 data Closure
 
@@ -26,8 +29,11 @@ instance Show Closure where
 
 data InfoTable
 
-data Payload = PtrPayload (Ptr Closure) | NPtrPayload Word
-  deriving (Eq, Ord, Show)
+data Payload
+  = PtrPayload (Ptr Closure)
+  | NPtrPayload Word
+  | ArrayPayload (UArray Word Word8)
+    deriving (Eq, Ord, Show)
 
 -- newtype EncodedState = EncodedState (Map (Ptr Void) Any)
 data EncodedState = EncodedState [Ptr Closure] (Map (Ptr Closure) (Set Payload))
@@ -64,3 +70,12 @@ yieldPtr ptr (EncodedState stack@(top:_) st) | traceShow ("ptr", Ptr ptr) True =
 yieldNPtr :: Word# -> EncodedState -> EncodedState
 yieldNPtr val (EncodedState stack@(top:_) st) = traceShow ("nptr", W# val)
   (EncodedState stack (Map.insertWith mappend top (Set.singleton (NPtrPayload (W# val))) st))
+
+yieldArrWords :: ByteArray# -> EncodedState -> EncodedState
+yieldArrWords arr (EncodedState stack@(top:_) st) =
+  let bytes  = sizeofByteArray# arr
+      bytes' = fromIntegral $ I# bytes
+      uarray = UArray 1 bytes' (fromIntegral bytes') arr
+      set'   = Set.singleton (ArrayPayload uarray)
+  in traceShow ("bytes", bytes', Ptr (unsafeCoerce# arr))
+  (EncodedState stack (Map.insertWith mappend top set' st))
