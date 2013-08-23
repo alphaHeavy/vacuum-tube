@@ -1,5 +1,27 @@
 #include <Cmm.h>
 
+Serializze_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
+{
+  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
+
+  // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
+  (P_ sty) = call %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, 0, clos, stx);
+
+  // popTag :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, sty);
+}
+
+Serializze_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
+{
+  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
+
+  W_ ptrs;
+  ptrs = TO_W_(%INFO_PTRS(info));
+  jump Serializze_dumpPtrs (clos, 0, ptrs, stx);
+}
+
 // Entry point in the Cmm side to walk the value graph pointed to from a
 // while folding st over each value and their respective payloads
 //
@@ -11,23 +33,60 @@ Serializze_encodeObject (P_ a, P_ st)
   info = %GET_STD_INFO(clos);
   type = TO_W_(%INFO_TYPE(info));
 
-  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
-
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {
     // specialization for ByteArray#
     case ARR_WORDS:
     {
-      // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-      jump %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, 0, clos, stx);
+      jump Serializze_dumpArray (a, clos, info, type, st);
+    }
+
+    // @TODO: implement, frozen mutable arrays are ok
+    case MUT_ARR_PTRS_FROZEN0, MUT_ARR_PTRS_FROZEN:
+      goto FAIL;
+
+    // but not after they're thawed
+    case MUT_ARR_PTRS_CLEAN, MUT_ARR_PTRS_DIRTY:
+      goto FAIL;
+
+    // we've stumbled upon thread related bits
+    case TSO, STACK, UPDATE_FRAME, CATCH_FRAME, UNDERFLOW_FRAME, STOP_FRAME:
+      goto FAIL;
+
+    // Call a helper function to block on the blackhole
+    case BLACKHOLE, WHITEHOLE:
+      goto FAIL;
+
+    // MVars
+    case MUT_VAR_CLEAN, MUT_VAR_DIRTY:
+      goto FAIL;
+
+    // STM support
+    case TREC_CHUNK, ATOMICALLY_FRAME, CATCH_RETRY_FRAME, CATCH_STM_FRAME:
+      goto FAIL;
+
+    // pointer types
+    case WEAK, PRIM, MUT_PRIM:
+      goto FAIL;
+
+    // @TODO: unsure about these ... i'm guessing we need to handle them
+    case RET_BCO, RET_SMALL, RET_BIG, RET_FUN, AP_STACK:
+      goto FAIL;
+
+    case CONSTR, CONSTR_1_0, CONSTR_0_1, CONSTR_2_0, CONSTR_1_1, CONSTR_0_2, CONSTR_STATIC, CONSTR_NOCAF_STATIC,
+         FUN, FUN_1_0, FUN_0_1, FUN_2_0, FUN_1_1, FUN_0_2, FUN_STATIC,
+         THUNK, THUNK_1_0, THUNK_0_1, THUNK_2_0, THUNK_1_1, THUNK_0_2, THUNK_STATIC, THUNK_SELECTOR,
+         IND, IND_PERM, IND_STATIC,
+         AP, PAP:
+    {
+      jump Serializze_dumpClosure (a, clos, info, type, st);
     }
 
     default:
     {
-      W_ ptrs;
-      ptrs = TO_W_(%INFO_PTRS(info));
-      jump Serializze_dumpPtrs (clos, 0, ptrs, stx);
+FAIL:
+      // Serialize.unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+      jump %ENTRY_CODE(Serializze_unsupportedTag_info) (Serializze_unsupportedTag_info, type, info, clos, st);
     }
   }
 }

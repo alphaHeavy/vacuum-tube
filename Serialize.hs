@@ -55,6 +55,10 @@ pushTag tag infoTable entryCode (EncodedState stack st) =
   traceShow ("push", W# tag, Ptr infoTable, Ptr entryCode)
   (EncodedState ((W# tag, Ptr infoTable, Ptr entryCode):stack) st)
 
+unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+unsupportedTag tag infoTable entryCode (EncodedState stack st) =
+  error "omg"
+
 yieldPtr :: Word# -> Addr# -> EncodedState -> EncodedState
 yieldPtr slot ptr (EncodedState stack@((_, _, top):_) st) | traceShow ("ptr", Ptr ptr) True =
   let ptr' = Ptr ptr
