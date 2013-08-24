@@ -1,5 +1,39 @@
 #include <Cmm.h>
 
+// Serializze_allocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
+Serializze_allocateClosure (W_ info, W_ st)
+{
+  W_ bytes, ptrs, nptrs;
+  P_ val;
+
+  ptrs = TO_W_(%INFO_PTRS(info));
+  nptrs = TO_W_(%INFO_NPTRS(info));
+  bytes = SIZEOF_StgHeader + WDS(ptrs) + WDS(nptrs);
+  val = Hp;
+  Hp = Hp + bytes;
+  if (Hp > HpLim)
+  {
+    HpAlloc = bytes;
+    jump %ENTRY_CODE(stg_gc_fun_info) (Serializze_allocateClosure);
+  }
+
+  SET_HDR(val, info, CCCS);
+
+  return (st, val, ptrs, nptrs);
+}
+
+Serializze_setPtr (P_ a, W_ i, P_ v, W_ st)
+{
+  StgClosure_payload(a, i) = v;
+  return (st);
+}
+
+Serializze_setNPtr (P_ a, W_ i, W_ v, W_ st)
+{
+  StgClosure_payload(a, i) = v;
+  return (st);
+}
+
 Serializze_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
