@@ -9,44 +9,95 @@
 
 module Serialize where
 
+import Control.Applicative
+import Data.Array.Base
+import Data.Binary
+import Data.Foldable
+import Data.Map.Lazy as Map
+import Data.Monoid (mappend)
+import Data.STRef
+import Data.Set as Set
+
+import GHC.Generics
 import GHC.Prim
 import GHC.Ptr
 import GHC.ST
-import Data.STRef
 import GHC.Types
 import GHC.Word
-import Data.Set as Set
-import Data.Map.Lazy as Map
-import Data.Monoid (mappend)
+
 import Debug.Trace
 
-import Data.Array.Base
-import Data.Binary
+newtype VacuumPtr a = VacuumPtr{unVacuumPtr :: a}
+
+instance Binary (VacuumPtr (Ptr a)) where
+  put (VacuumPtr (Ptr val)) = put (W# (unsafeCoerce# val))
+  get = do
+    W# val <- get
+    return . VacuumPtr $ Ptr (unsafeCoerce# val)
 
 data Closure
+  deriving Generic
 
 instance Show Closure where
   show _ = "Void"
 
+instance Binary (Ptr Closure) where
+  put = put . VacuumPtr
+  get = unVacuumPtr <$> get
+
 data InfoTable
+
+instance Binary (Ptr InfoTable) where
+  put = put . VacuumPtr
+  get = unVacuumPtr <$> get
 
 data Payload
   = PtrPayload (Ptr Closure)
   | NPtrPayload Word
   | ArrayPayload (UArray Word Word8)
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Generic, Show)
+
+instance Binary Payload
 
 data Errythang = Errythang{erryTag :: Tag, erryInfoTable :: Ptr InfoTable, erryClosure :: Ptr Closure}
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Generic, Show)
+
+instance Binary Errythang
 
 newtype VacuumTube a = VacuumTube{unVacuumTube :: a}
 
 instance Binary (VacuumTube a) where
-  put _ = undefined
-  get = undefined
+  put (VacuumTube val) =
+    let st = EncodedState [] Set.empty Map.empty
+    in put $ encodeObject val st
+
+  get = do
+    EncodedState [] set map <- get
+    runST $ do
+      root <- newSTRef (error "whynoref?")
+      for_ set $ \ Errythang{erryInfoTable = infoTable, erryClosure = clos} -> do
+        l <- limbo infoTable
+        case Map.lookup clos map of
+          Nothing -> error "omg wtf"
+          Just val ->
+            for_ (Map.toList val) $ \ (k, v) ->
+              case v of
+                PtrPayload (Ptr p) -> setPtr l k (unsafeCoerce# p :: Any)
+                NPtrPayload p -> setNPtr l k p
+
+      readSTRef root
+
+{-
+    let (!Errythang{erryInfoTable = Ptr x}:_) = Set.toList set
+    runST $ do
+      case Map.lookup 
+      undefined
+-}
 
 data EncodedState = EncodedState [Errythang] (Set Errythang) (Map (Ptr Closure) (Map Word Payload))
-  deriving Show
+  deriving (Show, Generic)
+
+instance Binary EncodedState
 
 foreign import prim "Serializze_encodeObject" unsafeEncodeObject :: Any -> Any -> (# Any #)
 foreign import prim "Serializze_allocateClosure" unsafeAllocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
@@ -112,9 +163,9 @@ limbo (Ptr infoTable) = do
 
   return Limbo{limboPtrs = ptrSet, limboNPtrs = nptrSet, limboVal = clos}
 
-setPtr :: Limbo s a -> Word -> a -> ST s ()
+setPtr :: Limbo s a -> Word -> Any -> ST s ()
 setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot'@(W# slot) val = do
-  ST $ \ st -> case unsafeSetPtr closure slot (unsafeCoerce# val) st of
+  ST $ \ st -> case unsafeSetPtr closure slot val st of
     (# st' #) -> (# st', () #)
 
   modifySTRef' ptrSet (Set.delete slot')

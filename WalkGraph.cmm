@@ -14,26 +14,48 @@ Serializze_allocateClosure (W_ info, W_ st)
   if (Hp > HpLim)
   {
     HpAlloc = bytes;
-    jump %ENTRY_CODE(stg_gc_fun_info) (Serializze_allocateClosure);
+    jump %ENTRY_CODE(stg_gc_fun_info) (stg_gc_fun_info, Serializze_allocateClosure);
   }
 
   SET_HDR(val, info, CCCS);
 
+  W_ i;
+  i = 0;
+
+loop1:
+  if (i < ptrs)
+  {
+    StgClosure_payload(val, i) = 0;
+    i = i + 1;
+    goto loop1;
+  }
+
+loop2:
+  if (i < (ptrs + nptrs))
+  {
+    StgClosure_payload(val, i) = 0;
+    i = i + 1;
+    goto loop2;
+  }
+
   return (st, val, ptrs, nptrs);
 }
 
+// Serializze_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 Serializze_setPtr (P_ a, W_ i, P_ v, W_ st)
 {
   StgClosure_payload(a, i) = v;
   return (st);
 }
 
+// Serializze_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
 Serializze_setNPtr (P_ a, W_ i, W_ v, W_ st)
 {
   StgClosure_payload(a, i) = v;
   return (st);
 }
 
+// Serializze_dumpArray :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
 Serializze_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
