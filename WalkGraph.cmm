@@ -9,15 +9,17 @@ Serializze_allocateClosure (W_ info, W_ st)
   ptrs = TO_W_(%INFO_PTRS(info));
   nptrs = TO_W_(%INFO_NPTRS(info));
   bytes = SIZEOF_StgHeader + WDS(ptrs) + WDS(nptrs);
+
   val = Hp;
   Hp = Hp + bytes;
   if (Hp > HpLim)
   {
     HpAlloc = bytes;
-    jump %ENTRY_CODE(stg_gc_fun_info) (stg_gc_fun_info, Serializze_allocateClosure);
+    call stg_gc_noregs ();
+    jump Serializze_allocateClosure (info, st);
   }
 
-  SET_HDR(val, info, CCCS);
+  SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
 
   W_ i;
   i = 0;
@@ -25,7 +27,7 @@ Serializze_allocateClosure (W_ info, W_ st)
 loop1:
   if (i < ptrs)
   {
-    StgClosure_payload(val, i) = 0;
+    StgClosure_payload(UNTAG(val), i) = base_GHCziErr_undefined_closure;
     i = i + 1;
     goto loop1;
   }
@@ -33,7 +35,7 @@ loop1:
 loop2:
   if (i < (ptrs + nptrs))
   {
-    StgClosure_payload(val, i) = 0;
+    StgClosure_payload(UNTAG(val), i) = 0;
     i = i + 1;
     goto loop2;
   }
@@ -44,14 +46,14 @@ loop2:
 // Serializze_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 Serializze_setPtr (P_ a, W_ i, P_ v, W_ st)
 {
-  StgClosure_payload(a, i) = v;
+  StgClosure_payload(UNTAG(a), i) = v;
   return (st);
 }
 
 // Serializze_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
 Serializze_setNPtr (P_ a, W_ i, W_ v, W_ st)
 {
-  StgClosure_payload(a, i) = v;
+  StgClosure_payload(UNTAG(a), i) = v;
   return (st);
 }
 

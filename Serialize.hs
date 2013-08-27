@@ -79,20 +79,19 @@ instance Binary (VacuumTube a) where
         l <- limbo infoTable
         case Map.lookup clos map of
           Nothing -> error "omg wtf"
-          Just val ->
+          Just val -> do
             for_ (Map.toList val) $ \ (k, v) ->
               case v of
                 PtrPayload (Ptr p) -> setPtr l k (unsafeCoerce# p :: Any)
                 NPtrPayload p -> setNPtr l k p
+                ArrayPayload _ -> return ()
+
+            mval <- ascend l
+            case mval of
+              Just complete -> writeSTRef root complete
+              Nothing -> error "partially constructed value"
 
       readSTRef root
-
-{-
-    let (!Errythang{erryInfoTable = Ptr x}:_) = Set.toList set
-    runST $ do
-      case Map.lookup 
-      undefined
--}
 
 data EncodedState = EncodedState [Errythang] (Set Errythang) (Map (Ptr Closure) (Map Word Payload))
   deriving (Show, Generic)
@@ -147,7 +146,7 @@ yieldArrWords slot arr (EncodedState stack@(Errythang _ _ top:_) erry st) =
   in traceShow ("bytes", bytes, Ptr (unsafeCoerce# arr))
   (EncodedState stack erry (Map.insertWith mappend top set' st))
 
-data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: Any}
+data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: a}
 type Tag = Word
 type Ptrs = Word
 type NPtrs = Word
@@ -161,18 +160,20 @@ limbo (Ptr infoTable) = do
   ptrSet  <- newSTRef $ Set.fromList [i-1 | i <- [1..ptrs]]
   nptrSet <- newSTRef $ Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  return Limbo{limboPtrs = ptrSet, limboNPtrs = nptrSet, limboVal = clos}
+  return Limbo{limboPtrs = ptrSet, limboNPtrs = nptrSet, limboVal = unsafeCoerce# clos}
 
 setPtr :: Limbo s a -> Word -> Any -> ST s ()
-setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot'@(W# slot) val = do
-  ST $ \ st -> case unsafeSetPtr closure slot val st of
-    (# st' #) -> (# st', () #)
+setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot'@(W# slot) val
+  | traceShow ("setPtr", slot') False = undefined
+  | otherwise = do
+      ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure) slot val st of
+        (# st' #) -> (# st', () #)
 
-  modifySTRef' ptrSet (Set.delete slot')
+      modifySTRef' ptrSet (Set.delete slot')
 
 setNPtr :: Limbo s a -> Word -> Word -> ST s ()
 setNPtr Limbo{limboNPtrs = nptrSet, limboVal = closure} slot'@(W# slot) (W# val) = do
-  ST $ \ st -> case unsafeSetNPtr closure slot val st of
+  ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure) slot val st of
     (# st' #) -> (# st', () #)
 
   modifySTRef' nptrSet (Set.delete slot')
