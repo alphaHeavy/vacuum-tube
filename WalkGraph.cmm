@@ -1,5 +1,11 @@
 #include <Cmm.h>
 
+// Serializze_getInfoTable :: Any -> State# s -> (# State# s, Addr# #)
+Serializze_getInfoTable (P_ a)
+{
+  return (%GET_STD_INFO(UNTAG(a)));
+}
+
 // Serializze_allocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
 Serializze_allocateClosure (W_ info)
 {
