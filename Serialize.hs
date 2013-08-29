@@ -115,7 +115,7 @@ popTag (EncodedState (_:stack) erry st) =
 pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
 pushTag tag infoTable entryCode (EncodedState stack erry st) =
   let self = Errythang (W# tag) (Ptr infoTable) (Ptr entryCode)
-      encst = EncodedState (self:stack) (Set.insert self erry) st
+      encst = EncodedState (self:stack) (Set.insert self erry) (Map.insert (Ptr entryCode) Map.empty st)
   in traceShow ("push", W# tag, Ptr infoTable, Ptr entryCode) encst
 
 unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
