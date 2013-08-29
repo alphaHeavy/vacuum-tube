@@ -99,7 +99,7 @@ data EncodedState = EncodedState [Errythang] (Set Errythang) (Map (Ptr Closure) 
 instance Binary EncodedState
 
 foreign import prim "Serializze_encodeObject" unsafeEncodeObject :: Any -> Any -> (# Any #)
-foreign import prim "Serializze_allocateClosure" unsafeAllocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
+foreign import prim "Serializze_allocateClosure" unsafeAllocateClosure :: Addr# -> State# s -> (# State# s, Addr#, Word#, Word# #)
 foreign import prim "Serializze_setPtr" unsafeSetPtr :: Any -> Word# -> Any -> State# s -> (# State# s #)
 foreign import prim "Serializze_setNPtr" unsafeSetNPtr :: Any -> Word# -> Word# -> State# s -> (# State# s #)
 
@@ -151,16 +151,22 @@ type Tag = Word
 type Ptrs = Word
 type NPtrs = Word
 
+allocateClosure :: Ptr InfoTable -> ST s (Ptr Closure, Word, Word)
+allocateClosure (Ptr infoTable) = ST  $ \ st ->
+  case unsafeAllocateClosure infoTable st of
+    (# st', clos, ptrs, nptrs #) -> (# st', (Ptr clos, W# ptrs, W# nptrs) #)
+
 limbo :: Ptr InfoTable -> ST s (Limbo s a)
-limbo (Ptr infoTable) = do
-  (clos, ptrs, nptrs) <- ST $ \ st ->
-    case unsafeAllocateClosure infoTable st of
-      (# st', clos, ptrs, nptrs #) -> (# st', (clos, W# ptrs, W# nptrs) #)
+limbo infoTable = do
+  (clos'@(Ptr clos), ptrs, nptrs) <- allocateClosure infoTable
 
-  ptrSet  <- newSTRef $ Set.fromList [i-1 | i <- [1..ptrs]]
-  nptrSet <- newSTRef $ Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
+  let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
+      nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  return Limbo{limboPtrs = ptrSet, limboNPtrs = nptrSet, limboVal = unsafeCoerce# clos}
+  ptrRef  <- newSTRef ptrSet
+  nptrRef <- newSTRef nptrSet
+
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos}
 
 setPtr :: Limbo s a -> Word -> Any -> ST s ()
 setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot'@(W# slot) val
