@@ -1,23 +1,24 @@
 #include <Cmm.h>
 
+Serializze_allocateClosure2 (W_ info, W_ st)
+{
+  return (st, 0, 0, 0);
+}
+
 // Serializze_allocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
 Serializze_allocateClosure (W_ info, W_ st)
 {
   W_ bytes, ptrs, nptrs;
-  P_ val;
 
   ptrs = TO_W_(%INFO_PTRS(info));
   nptrs = TO_W_(%INFO_NPTRS(info));
   bytes = SIZEOF_StgHeader + WDS(ptrs) + WDS(nptrs);
 
-  val = Hp;
+  HP_CHK_GEN(bytes);
+
+  P_ val;
+  val = Hp + WDS(1);
   Hp = Hp + bytes;
-  if (Hp > HpLim)
-  {
-    HpAlloc = bytes;
-    call stg_gc_noregs ();
-    jump Serializze_allocateClosure (info, st);
-  }
 
   SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
 
@@ -27,7 +28,7 @@ Serializze_allocateClosure (W_ info, W_ st)
 loop1:
   if (i < ptrs)
   {
-    StgClosure_payload(UNTAG(val), i) = base_GHCziErr_undefined_closure;
+    StgClosure_payload(val, i) = base_GHCziErr_undefined_closure;
     i = i + 1;
     goto loop1;
   }
@@ -35,25 +36,25 @@ loop1:
 loop2:
   if (i < (ptrs + nptrs))
   {
-    StgClosure_payload(UNTAG(val), i) = 0;
+    StgClosure_payload(val, i) = 0;
     i = i + 1;
     goto loop2;
   }
 
-  return (st, val, ptrs, nptrs);
+  return (st, 0, ptrs, nptrs);
 }
 
 // Serializze_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 Serializze_setPtr (P_ a, W_ i, P_ v, W_ st)
 {
-  StgClosure_payload(UNTAG(a), i) = v;
+  StgClosure_payload(a, i) = v;
   return (st);
 }
 
 // Serializze_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
 Serializze_setNPtr (P_ a, W_ i, W_ v, W_ st)
 {
-  StgClosure_payload(UNTAG(a), i) = v;
+  StgClosure_payload(a, i) = v;
   return (st);
 }
 
