@@ -31,10 +31,10 @@ import Debug.Trace
 newtype VacuumPtr a = VacuumPtr{unVacuumPtr :: a}
 
 instance Binary (VacuumPtr (Ptr a)) where
-  put (VacuumPtr (Ptr val#)) = put (W# (unsafeCoerce# val#))
+  put (VacuumPtr (Ptr val#)) = put (W# (unsafeCoerce# val# :: Word#))
   get = do
     W# val# <- get
-    return . VacuumPtr $ Ptr (unsafeCoerce# val#)
+    return . VacuumPtr $ Ptr (unsafeCoerce# val# :: Addr#)
 
 data Closure
   deriving Generic
@@ -107,8 +107,8 @@ foreign import prim "Serializze_getInfoTable" unsafeGetInfoTable :: Any -> State
 
 encodeObject :: a -> EncodedState -> ST s EncodedState
 encodeObject val enc = ST $ \ st ->
-  case unsafeEncodeObject (unsafeCoerce# val) (unsafeCoerce# enc) st of
-    (# st', res #) -> (# st', unsafeCoerce# res #)
+  case unsafeEncodeObject (unsafeCoerce# val :: Any) (unsafeCoerce# enc :: Any) st of
+    (# st', res #) -> (# st', unsafeCoerce# res :: EncodedState #)
 
 popTag :: EncodedState -> EncodedState
 popTag (EncodedState (_:stack) erry st) =
@@ -170,7 +170,7 @@ allocateClosure (Ptr infoTable#) = ST  $ \ st ->
   case unsafeAllocateClosure infoTable# st of
     (# st', clos#, ptrs#, nptrs# #) -> (# st', (Ptr clos#, W# ptrs#, W# nptrs#) #)
 
-limbo :: Ptr InfoTable -> ST s (Limbo s a)
+limbo :: forall a s . Ptr InfoTable -> ST s (Limbo s a)
 limbo infoTable = do
   unsafeIOToST $ print ("allocating", infoTable)
 
@@ -184,21 +184,20 @@ limbo infoTable = do
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
 
-  -- traceShow ("allocated", unsafeCoerce# clos :: Ptr Closure, ptrSet, nptrSet) $
-  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos#}
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos# :: a}
 
 setPtr :: Limbo s a -> Word -> Any -> ST s ()
 setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot@(W# slot#) val
   | traceShow ("setPtr", slot) False = undefined
   | otherwise = do
-      ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure) slot# val st of
+      ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure :: Any) slot# val st of
         (# st' #) -> (# st', () #)
 
       modifySTRef' ptrSet (Set.delete slot)
 
 setNPtr :: Limbo s a -> Word -> Word -> ST s ()
 setNPtr Limbo{limboNPtrs = nptrRef, limboVal = closure} slot@(W# slot#) (W# val#) = do
-  ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure) slot# val# st of
+  ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure :: Any) slot# val# st of
     (# st' #) -> (# st', () #)
 
   modifySTRef' nptrRef (Set.delete slot)
@@ -208,5 +207,5 @@ ascend Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = val} = do
   ptrSet <- readSTRef ptrRef
   nptrSet <- readSTRef nptrRef
   return $ case (Set.null ptrSet, Set.null nptrSet) of
-    (True, True) -> Just (unsafeCoerce# val)
+    (True, True) -> Just val
     _            -> Nothing
