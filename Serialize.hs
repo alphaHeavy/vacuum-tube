@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GHCForeignImportPrim #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -10,9 +11,11 @@
 module Serialize where
 
 import Control.Applicative
+import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Array.Base
 import Data.Binary
 import Data.Foldable
+import Data.List as List
 import Data.Map.Lazy as Map
 import Data.Maybe (fromMaybe)
 import Data.Monoid (mappend)
@@ -60,42 +63,56 @@ data Payload
 
 instance Binary Payload
 
-data Errythang = Errythang{erryTag :: Tag, erryInfoTable :: Ptr InfoTable, erryClosure :: Ptr Closure}
+data VacuumNode = VacuumNode{vacuumInfoTable :: Ptr InfoTable, vacuumClosure :: Ptr Closure}
   deriving (Eq, Ord, Generic, Show)
 
-instance Binary Errythang
+instance Binary VacuumNode
 
 newtype VacuumTube a = VacuumTube{unVacuumTube :: a}
 
+buildRemap :: Map (Ptr Closure) (Limbo s Any) -> VacuumNode -> ST s (Map (Ptr Closure) (Limbo s Any))
+buildRemap remap VacuumNode{vacuumInfoTable = infoTable, vacuumClosure = closure} = do
+  l <- limbo infoTable
+  return $! Map.insert closure l remap
+
+keysDifference :: Ord a => Map a b -> Map a c -> Set a
+keysDifference x y = Set.difference (Map.keysSet x) (Map.keysSet y)
+
 instance Binary (VacuumTube a) where
   put (VacuumTube val) =
-    let st = EncodedState [] Set.empty Map.empty
+    let st = EncodedState (error "undefined root") [] Set.empty Map.empty
     in put $ runST $ encodeObject val st
 
   get = do
-    EncodedState [] set map <- get
-    return $ runST $ do
-      root :: STRef s (VacuumTube a) <- newSTRef (error "whynoref?")
-      for_ set $ \ Errythang{erryInfoTable = infoTable, erryClosure = clos} -> do
-        l <- limbo infoTable
-        case Map.lookup clos map of
-          Nothing -> error $ "omg wtf " ++ show clos ++ " " ++ show map
-          Just val -> do
+    EncodedState root [] set map <- get
+    runST $ do
+      remap <- foldlM buildRemap Map.empty set
+      if not (Set.null (keysDifference remap map))
+        then return $ fail "Leftover keys"
+        else do
+          for_ (Map.intersectionWith (,) remap map) $ \ (l, val) ->
             for_ (Map.toList val) $ \ (k, v) ->
               case v of
-                PtrPayload (Ptr p) -> trace "setPtr" $ setPtr l k (unsafeCoerce# p :: Any)
-                NPtrPayload p -> trace "setNPtr" $ setNPtr l k p
+                PtrPayload p
+                  | Just p' <- Map.lookup p remap -> setPtr l k p'
+                  | otherwise -> fail "hum, missing pointer payload"
+                NPtrPayload p -> setNPtr l k p
                 ArrayPayload _ -> return ()
 
-            mval <- trace "ascend" $ ascend l
-            case mval of
-              Just complete -> trace "write" $ writeSTRef root complete
-              Nothing -> error "partially constructed value"
+          case Map.lookup (vacuumClosure root) remap of
+            Just limboRoot -> do
+              mval <- ascend limboRoot
+              case mval of
+                Just val -> return $ return (VacuumTube val :: VacuumTube a)
+                Nothing  -> return $ fail "Ascension failed"
+            Nothing -> return $ fail "Root closure not found after construction"
 
-      readSTRef root
-
-data EncodedState = EncodedState [Errythang] (Set Errythang) (Map (Ptr Closure) (Map Word Payload))
-  deriving (Show, Generic)
+data EncodedState = EncodedState
+  { encodedRoot  :: VacuumNode
+  , encodedStack :: [VacuumNode]
+  , encodedNodes :: Set VacuumNode
+  , encodedPayloads :: Map (Ptr Closure) (Map Word Payload)
+  } deriving (Show, Generic)
 
 instance Binary EncodedState
 
@@ -111,42 +128,44 @@ encodeObject val enc = ST $ \ st ->
     (# st', res #) -> (# st', unsafeCoerce# res :: EncodedState #)
 
 popTag :: EncodedState -> EncodedState
-popTag (EncodedState (_:stack) erry st) =
-  trace "pop" (EncodedState stack erry st)
+popTag (EncodedState root (_:stack) erry st) =
+  trace "pop" (EncodedState root stack erry st)
 
 pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-pushTag tag# infoTable# entryCode# (EncodedState stack erry st) =
-  let self = Errythang (W# tag#) (Ptr infoTable#) (Ptr entryCode#)
-      encst = EncodedState (self:stack) (Set.insert self erry) (Map.insert (Ptr entryCode#) Map.empty st)
+pushTag tag# infoTable# entryCode# (EncodedState root stack erry st) =
+  let self = VacuumNode (Ptr infoTable#) (Ptr entryCode#)
+      root' | List.null stack = self
+            | otherwise = root
+      encst = EncodedState root' (self:stack) (Set.insert self erry) (Map.insert (Ptr entryCode#) Map.empty st)
   in traceShow ("push", W# tag#, Ptr infoTable#, Ptr entryCode#) encst
 
 unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-unsupportedTag tag# infoTable# entryCode# (EncodedState stack erry st) =
+unsupportedTag _tag# _infoTable# _entryCode# (EncodedState _root _stack _erry _st) =
   error "omg"
 
 yieldPtr :: Word# -> Addr# -> EncodedState -> ST s EncodedState
-yieldPtr slot# ptr# (EncodedState stack@(Errythang _ _ top:_) erry st) | traceShow ("ptr", Ptr ptr#) True =
+yieldPtr slot# ptr# (EncodedState root stack@(VacuumNode _ top:_) erry st) | traceShow ("ptr", Ptr ptr#) True =
   let ptr = Ptr ptr#
       payload = PtrPayload ptr
       addr = unsafeCoerce# ptr# :: Any
       insertPayload
-        | Map.member ptr st' = return $ EncodedState stack erry st'
-        | otherwise = encodeObject addr (EncodedState stack erry (Map.insertWith mappend ptr Map.empty st'))
+        | Map.member ptr st' = return $ EncodedState root stack erry st'
+        | otherwise = encodeObject addr (EncodedState root stack erry (Map.insertWith mappend ptr Map.empty st'))
         where st' = Map.insertWith mappend top (Map.singleton (W# slot#) payload) st
 
   in insertPayload
 
 yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
-yieldNPtr slot# val# (EncodedState stack@(Errythang _ _ top:_) erry st) = traceShow ("nptr", W# val#)
-  (EncodedState stack erry (Map.insertWith mappend top (Map.singleton (W# slot#) (NPtrPayload (W# val#))) st))
+yieldNPtr slot# val# (EncodedState root stack@(VacuumNode _ top:_) erry st) = traceShow ("nptr", W# val#)
+  (EncodedState root stack erry (Map.insertWith mappend top (Map.singleton (W# slot#) (NPtrPayload (W# val#))) st))
 
 yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-yieldArrWords slot# arr# (EncodedState stack@(Errythang _ _ top:_) erry st) =
+yieldArrWords slot# arr# (EncodedState root stack@(VacuumNode _ top:_) erry st) =
   let bytes  = fromIntegral $ I# (sizeofByteArray# arr#)
       uarray = UArray 1 bytes (fromIntegral bytes) arr#
       set'   = Map.singleton (W# slot#) (ArrayPayload uarray)
   in traceShow ("bytes", bytes, Ptr (unsafeCoerce# arr#))
-  (EncodedState stack erry (Map.insertWith mappend top set' st))
+  (EncodedState root stack erry (Map.insertWith mappend top set' st))
 
 data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: a}
 type Tag = Word
@@ -186,8 +205,8 @@ limbo infoTable = do
 
   return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos# :: a}
 
-setPtr :: Limbo s a -> Word -> Any -> ST s ()
-setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot@(W# slot#) val
+setPtr :: Limbo s a -> Word -> Limbo s Any -> ST s ()
+setPtr Limbo{limboPtrs = ptrSet, limboVal = closure} slot@(W# slot#) Limbo{limboVal = val}
   | traceShow ("setPtr", slot) False = undefined
   | otherwise = do
       ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure :: Any) slot# val st of
@@ -202,10 +221,10 @@ setNPtr Limbo{limboNPtrs = nptrRef, limboVal = closure} slot@(W# slot#) (W# val#
 
   modifySTRef' nptrRef (Set.delete slot)
 
-ascend :: Limbo s a -> ST s (Maybe a)
+ascend :: forall a s . Limbo s Any -> ST s (Maybe a)
 ascend Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = val} = do
   ptrSet <- readSTRef ptrRef
   nptrSet <- readSTRef nptrRef
   return $ case (Set.null ptrSet, Set.null nptrSet) of
-    (True, True) -> Just val
+    (True, True) -> Just (unsafeCoerce# val :: a)
     _            -> Nothing
