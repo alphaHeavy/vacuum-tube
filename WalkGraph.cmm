@@ -1,18 +1,16 @@
 #include <Cmm.h>
 
-// Serializze_getInfoTable :: Any -> State# s -> (# State# s, Addr# #)
-Serializze_getInfoTable (P_ a)
+// WalkGraph_getInfoTable :: Any -> State# s -> (# State# s, Addr# #)
+WalkGraph_getInfoTable (P_ a)
 {
   return (%GET_STD_INFO(UNTAG(a)));
 }
 
-// Serializze_allocateClosure :: Addr# -> State# s -> (# State# s, Any, Word#, Word# #)
-Serializze_allocateClosure (W_ info)
+// WalkGraph_allocateClosure :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any, Word#, Word# #)
+WalkGraph_allocateClosure (W_ info, W_ ptrs, W_ nptrs)
 {
-  W_ bytes, ptrs, nptrs;
+  W_ bytes;
 
-  ptrs = TO_W_(%INFO_PTRS(info));
-  nptrs = TO_W_(%INFO_NPTRS(info));
   bytes = SIZEOF_StgHeader + WDS(ptrs) + WDS(nptrs);
 
   HP_CHK_GEN(bytes);
@@ -42,28 +40,39 @@ loop2:
     goto loop2;
   }
 
-  return (val, ptrs, nptrs);
+  return (val);
 }
 
-// Serializze_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
-Serializze_setPtr (P_ a, W_ i, P_ v)
+// WalkGraph_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
+WalkGraph_setPtr (P_ a, W_ i, P_ v)
+{
+  OVERWRITING_CLOSURE(a);
+  StgClosure_payload(a, i) = v;
+  return ();
+}
+
+// WalkGraph_indirectByteArray :: Addr# -> ByteArray# -> State# s -> (# State# s #)
+WalkGraph_indirectByteArray (P_ a, P_ v)
+{
+  OVERWRITING_CLOSURE(a);
+  // SET_HDR(a, stg_IND_info+SIZEOF_StgInfoTable, CCCS);
+  SET_INFO(a, stg_IND_info);
+  StgInd_indirectee(a) = v;
+  return ();
+}
+
+// WalkGraph_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
+WalkGraph_setNPtr (P_ a, W_ i, W_ v)
 {
   StgClosure_payload(a, i) = v;
   return ();
 }
 
-// Serializze_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
-Serializze_setNPtr (P_ a, W_ i, W_ v)
-{
-  StgClosure_payload(a, i) = v;
-  return ();
-}
-
-// Serializze_dumpArray :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
-Serializze_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
+// WalkGraph_dumpArray :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
+WalkGraph_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, 0, 0, clos, st);
 
   // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
   (P_ sty) = call %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, 0, clos, stx);
@@ -72,24 +81,57 @@ Serializze_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
   jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, sty);
 }
 
-Serializze_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
+WalkGraph_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
+  W_ ptrs, nptrs;
+  ptrs = TO_W_(%INFO_PTRS(info));
+  nptrs = TO_W_(%INFO_NPTRS(info));
+
   // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, clos, st);
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, ptrs, nptrs, clos, st);
 
   W_ ptrs;
   ptrs = TO_W_(%INFO_PTRS(info));
-  jump Serializze_dumpPtrs (clos, 0, ptrs, stx);
+  jump WalkGraph_dumpPtrs (clos, 0, ptrs, stx);
+}
+
+// WalkGraph_dumpIndirection :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
+WalkGraph_dumpIndirection (P_ a, W_ clos, W_ info, W_ type, P_ st)
+{
+  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, 1, 0, clos, st);
+
+  // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
+  (P_ sty) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, 0, UNTAG(StgInd_indirectee(clos)), stx);
+
+  // popTag :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, sty);
+}
+
+// WalkGraph_dumpStatic :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
+WalkGraph_dumpStatic (P_ a, W_ clos, W_ info, W_ type, P_ st)
+{
+  // Serialize.pushStatic :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushStatic_info) (Serializze_pushTag_info, clos, st);
+
+  // popTag :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, stx);
 }
 
 // Entry point in the Cmm side to walk the value graph pointed to from a
 // while folding st over each value and their respective payloads
 //
-// Serializze_encodeObject :: a -> EncodedState -> EncodedState
-Serializze_encodeObject (P_ a, P_ st)
+// WalkGraph_encodeObject :: a -> EncodedState -> EncodedState
+WalkGraph_encodeObject (P_ a, P_ st)
 {
+AGAIN:
   W_ clos, info, type;
   clos = UNTAG(a);
+  if (clos == 0)
+  {
+    return (st);
+  }
+
   info = %GET_STD_INFO(clos);
   type = TO_W_(%INFO_TYPE(info));
 
@@ -98,7 +140,7 @@ Serializze_encodeObject (P_ a, P_ st)
     // specialization for ByteArray#
     case ARR_WORDS:
     {
-      jump Serializze_dumpArray (a, clos, info, type, st);
+      jump WalkGraph_dumpArray (a, clos, info, type, st);
     }
 
     // @TODO: implement, frozen mutable arrays are ok
@@ -111,10 +153,6 @@ Serializze_encodeObject (P_ a, P_ st)
 
     // we've stumbled upon thread related bits
     case TSO, STACK, UPDATE_FRAME, CATCH_FRAME, UNDERFLOW_FRAME, STOP_FRAME:
-      goto FAIL;
-
-    // Call a helper function to block on the blackhole
-    case BLACKHOLE, WHITEHOLE:
       goto FAIL;
 
     // MVars
@@ -133,13 +171,22 @@ Serializze_encodeObject (P_ a, P_ st)
     case RET_BCO, RET_SMALL, RET_BIG, RET_FUN, AP_STACK:
       goto FAIL;
 
-    case CONSTR, CONSTR_1_0, CONSTR_0_1, CONSTR_2_0, CONSTR_1_1, CONSTR_0_2, CONSTR_STATIC, CONSTR_NOCAF_STATIC,
-         FUN, FUN_1_0, FUN_0_1, FUN_2_0, FUN_1_1, FUN_0_2, FUN_STATIC,
-         THUNK, THUNK_1_0, THUNK_0_1, THUNK_2_0, THUNK_1_1, THUNK_0_2, THUNK_STATIC, THUNK_SELECTOR,
-         IND, IND_PERM, IND_STATIC,
+    case BLACKHOLE, WHITEHOLE, IND, IND_PERM:
+    {
+      jump WalkGraph_dumpIndirection (a, clos, info, type, st);
+    }
+
+    case IND_STATIC, CONSTR_STATIC, CONSTR_NOCAF_STATIC, FUN_STATIC, THUNK_STATIC:
+    {
+      jump WalkGraph_dumpStatic (a, clos, info, type, st);
+    }
+
+    case CONSTR, CONSTR_1_0, CONSTR_0_1, CONSTR_2_0, CONSTR_1_1, CONSTR_0_2,
+         FUN, FUN_1_0, FUN_0_1, FUN_2_0, FUN_1_1, FUN_0_2,
+         THUNK, THUNK_1_0, THUNK_0_1, THUNK_2_0, THUNK_1_1, THUNK_0_2, THUNK_SELECTOR,
          AP, PAP:
     {
-      jump Serializze_dumpClosure (a, clos, info, type, st);
+      jump WalkGraph_dumpClosure (a, clos, info, type, st);
     }
 
     default:
@@ -152,32 +199,32 @@ FAIL:
 }
 
 // Call yieldPtr for each pointer payload then call dumpNPtrs for the rest
-Serializze_dumpPtrs (P_ clos, W_ p, W_ lim, P_ st)
+WalkGraph_dumpPtrs (P_ clos, W_ p, W_ lim, P_ st)
 {
   if (p < lim)
   {
     // yieldPtr :: Word# -> Addr# -> EncodedState -> EncodedState
     (P_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, p, UNTAG(StgClosure_payload(clos, p)), st);
-    jump Serializze_dumpPtrs (clos, p + 1, lim, stx);
+    jump WalkGraph_dumpPtrs (clos, p + 1, lim, stx);
   }
   else
   {
     W_ info, nptrs;
     info = %GET_STD_INFO(clos);
     nptrs = TO_W_(%INFO_NPTRS(info));
-    jump Serializze_dumpNPtrs (clos, p, lim + nptrs, st);
+    jump WalkGraph_dumpNPtrs (clos, p, lim + nptrs, st);
   }
 }
 
 // Call yieldNPtr for each non-pointer payload then pop the current value off
 // the serialization stack, continuing on our walk
-Serializze_dumpNPtrs (P_ clos, W_ p, W_ lim, P_ st)
+WalkGraph_dumpNPtrs (P_ clos, W_ p, W_ lim, P_ st)
 {
   if (p < lim)
   {
     // yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
     (P_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_info, p, StgClosure_payload(clos, p), st);
-    jump Serializze_dumpNPtrs (clos, p + 1, lim, stx);
+    jump WalkGraph_dumpNPtrs (clos, p + 1, lim, stx);
   }
   else
   {
