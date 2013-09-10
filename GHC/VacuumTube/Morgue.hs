@@ -12,6 +12,7 @@ module GHC.VacuumTube.Morgue
   , popState
   , pushArrWords
   , pushClosure
+  , pushIndirection
   , pushSelector
   , pushStatic
   , pushThunk
@@ -80,6 +81,13 @@ pushSelector infoTable# closure# selectee# st@EncodedState{encodedStack = xs, en
       node = VacuumSelector{vacuumInfoTable = Ptr infoTable#, vacuumSelectee = Ptr selectee#}
       encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("selector", Ptr infoTable#, ptr) encst
+
+pushIndirection :: Addr# -> Addr# -> Addr# -> EncodedState -> EncodedState
+pushIndirection infoTable# closure# indirectee# st@EncodedState{encodedStack = xs, encodedNodes} =
+  let ptr = Ptr closure#
+      node = VacuumInd{vacuumInfoTable = Ptr infoTable#, vacuumIndirectee = Ptr indirectee#}
+      encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
+  in traceShow ("indirection", Ptr infoTable#, ptr) encst
 
 pushStatic :: Addr# -> EncodedState -> EncodedState
 pushStatic closure# st@EncodedState{encodedStack = xs, encodedNodes} =

@@ -36,13 +36,20 @@ VacuumWalker_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
 VacuumWalker_dumpIndirection (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushClosure_closure), type, info, 1, 0, clos, st);
-
-  // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-  (P_ sty) = call %ENTRY_CODE(INPKG(yieldPtr_info)) (INPKG(yieldPtr_closure), 0, UNTAG(StgInd_indirectee(clos)), stx);
+  (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushIndirection_closure), info, clos, UNTAG(StgInd_indirectee(clos)), st);
 
   // popState :: EncodedState -> EncodedState
-  jump %ENTRY_CODE(INPKG(popState_info)) (INPKG(popState_closure), sty);
+  jump %ENTRY_CODE(INPKG(popState_info)) (INPKG(popState_closure), stx);
+}
+
+// VacuumWalker_dumpSelector :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
+VacuumWalker_dumpSelector (P_ a, W_ clos, W_ info, W_ type, P_ st)
+{
+  // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushSelector_closure), info, clos, UNTAG(StgThunk_payload(clos, 0)), st);
+
+  // popState :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(INPKG(popState_info)) (INPKG(popState_closure), stx);
 }
 
 // VacuumWalker_dumpStatic :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
@@ -117,9 +124,14 @@ VacuumWalker_encodeObject (P_ a, P_ st)
       jump VacuumWalker_dumpStatic (a, clos, info, type, st);
     }
 
+    case THUNK_SELECTOR:
+    {
+      jump VacuumWalker_dumpSelector (a, clos, info, type, st);
+    }
+
     case CONSTR, CONSTR_1_0, CONSTR_0_1, CONSTR_2_0, CONSTR_1_1, CONSTR_0_2,
          FUN, FUN_1_0, FUN_0_1, FUN_2_0, FUN_1_1, FUN_0_2,
-         THUNK, THUNK_1_0, THUNK_0_1, THUNK_2_0, THUNK_1_1, THUNK_0_2, THUNK_SELECTOR,
+         THUNK, THUNK_1_0, THUNK_0_1, THUNK_2_0, THUNK_1_1, THUNK_0_2,
          AP, PAP:
     {
       jump VacuumWalker_dumpClosure (a, clos, info, type, st);
