@@ -17,7 +17,7 @@ library
                        GHC.VacuumTube.VacuumPtr,
                        GHC.VacuumTube.Types,
                        GHC.VacuumTube.EncodedState
-  build-depends:       base, ghc-prim, array, binary, containers, bytestring
+  build-depends:       base >= 4.7, ghc-prim, array, binary, containers, bytestring
   c-sources:           cbits/Walker.cmm, cbits/Assembler.cmm
   ghc-options:         -Wall
 
