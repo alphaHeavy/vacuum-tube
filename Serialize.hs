@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GHCForeignImportPrim #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UnboxedTuples  #-}
 {-# LANGUAGE UnliftedFFITypes #-}
@@ -40,10 +41,6 @@ instance Binary (VacuumPtr (Ptr a)) where
     return . VacuumPtr $ Ptr (unsafeCoerce# val# :: Addr#)
 
 data Closure
-  deriving Generic
-
-instance Show Closure where
-  show _ = "Void"
 
 instance Binary (Ptr Closure) where
   put = put . VacuumPtr
@@ -64,15 +61,28 @@ data Payload
 instance Binary Payload
 
 data VacuumNode
-  = VacuumNode{vacuumInfoTable :: Ptr InfoTable, vacuumPtrs :: Word, vacuumNPtrs :: Word, vacuumClosure :: Ptr Closure}
-  | VacuumStatic{vacuumClosure :: Ptr Closure}
-  deriving (Eq, Ord, Generic, Show)
+  = VacuumClosure {vacuumInfoTable :: Ptr InfoTable, vacuumPayload    :: Map Word Payload}
+  | VacuumThunk   {vacuumInfoTable :: Ptr InfoTable, vacuumPayload    :: Map Word Payload}
+  | VacuumSelector{vacuumInfoTable :: Ptr InfoTable, vacuumSelectee   :: Ptr Closure}
+  | VacuumPAP     {vacuumInfoTable :: Ptr InfoTable, vacuumPayload    :: Map Word Payload, vacuumArity :: Word, vacuumNArgs :: Word, vacuumFun :: Ptr Closure}
+  | VacuumAP      {vacuumInfoTable :: Ptr InfoTable, vacuumPayload    :: Map Word Payload, vacuumArity :: Word, vacuumNArgs :: Word, vacuumFun :: Ptr Closure}
+  | VacuumAP_STACK{vacuumInfoTable :: Ptr InfoTable, vacuumPayload    :: Map Word Payload, vacuumFun :: Ptr Closure}
+  | VacuumInd     {vacuumInfoTable :: Ptr InfoTable, vacuumIndirectee :: Ptr Closure}
+  | VacuumStatic
+  | VacuumUndefined
+    deriving (Eq, Ord, Generic, Show)
 
 instance Binary VacuumNode
 
+type ClosureMap a = Map (Ptr Closure) a
+type VacuumMap = ClosureMap VacuumNode
+type LimboMap s a = ClosureMap (Limbo s a)
+
 newtype VacuumTube a = VacuumTube{unVacuumTube :: a}
 
-buildRemap :: Map (Ptr Closure) (Limbo s Any) -> VacuumNode -> ST s (Map (Ptr Closure) (Limbo s Any))
+allocateClosures :: LimboMap s Any -> (Ptr Closure, VacuumNode) -> ST s (LimboMap s Any)
+allocateClosures = undefined
+{-
 buildRemap remap VacuumNode{vacuumInfoTable = infoTable, vacuumPtrs = ptrs, vacuumNPtrs = nptrs, vacuumClosure = closure} = do
   unsafeIOToST . traceIO $ show ("limbo", infoTable, closure)
   l <- limbo infoTable ptrs nptrs
@@ -82,47 +92,47 @@ buildRemap remap VacuumStatic{vacuumClosure = closure} = do
   unsafeIOToST . traceIO $ show ("lstatic", closure)
   l <- limboStatic closure
   return $! Map.insert closure l remap
+-}
 
 keysDifference :: Ord a => Map a b -> Map a c -> Set a
 keysDifference x y = Map.keysSet x `Set.difference` Map.keysSet y
 
+setPayload :: LimboMap s Any -> Limbo s a -> Map Word Payload -> ST s ()
+setPayload remap l = traverse_ (uncurry step) . Map.toList where
+  step k (PtrPayload p)
+    | Just p' <- Map.lookup p remap = trace ("ptr match") $ setPtr l k p'
+    | otherwise = trace ("ptr nomatch") $ error "foo" -- setPtr l k (vacuumInfoTable 
+  step k (NPtrPayload p) = setNPtr l k p
+  step k (ArrayPayload (UArray _ _ _ p)) = setByteArray l k p
+
 instance Binary (VacuumTube a) where
   put (VacuumTube val) =
-    let st = EncodedState (error "undefined root") [] Set.empty Map.empty
+    let st = EncodedState Nothing [] Map.empty
     in put $ runST $ encodeObject val st
 
   get = do
-    EncodedState root [] nodeSet nodeMap <- get
-    traceShow ("root", root, nodeSet, nodeMap) $ runST $ do
-      remap <- foldlM buildRemap Map.empty nodeSet
-      if not (Set.null (keysDifference remap nodeMap))
-        then return $ fail "Leftover keys"
-        else trace ("Remap: " ++ show (Map.keys remap)) $ do
-          unsafeIOToST . traceIO $ "Top: " ++ show (Map.size (Map.intersectionWith (,) remap nodeMap))
-          for_ (Map.intersectionWith (,) remap nodeMap) $ \ (l, val) -> do
-            unsafeIOToST . traceIO $ "Per: " ++ show (Map.size val)
-            for_ (Map.toList val) $ \ (k, v) -> do
-              unsafeIOToST . traceIO $ "Checking: " ++ show v
-              case v of
-                PtrPayload p
-                  | Just p' <- Map.lookup p remap -> trace ("ptr match") $ setPtr l k p'
-                  | otherwise -> trace ("ptr nomatch") $ error "foo" -- setPtr l k (vacuumInfoTable 
-                NPtrPayload p -> setNPtr l k p
-                ArrayPayload (UArray _ _ _ p) -> setByteArray l k p
+    EncodedState (Just root) [] nodeMap <- get
+    traceShow ("root", root, nodeMap) $ runST $ do
+      remap <- foldlM allocateClosures Map.empty (Map.toList nodeMap)
+      -- unsafeIOToST . traceIO $ "Top: " ++ show (Map.size (Map.intersectionWith (,) remap nodeMap))
+      for_ (Map.intersectionWith (,) remap nodeMap) $ \ (l, v) -> do
+        -- unsafeIOToST . traceIO $ "Checking: " ++ show v
+        case v of
+          VacuumClosure{vacuumPayload} -> setPayload remap l vacuumPayload
+          VacuumThunk  {vacuumPayload} -> setPayload remap l vacuumPayload
 
-          case Map.lookup (vacuumClosure root) remap of
-            Just limboRoot -> do
-              mval <- ascend limboRoot
-              case mval of
-                Just val -> return $ return (VacuumTube val :: VacuumTube a)
-                Nothing  -> return $ fail "Ascension failed"
-            Nothing -> return $ fail "Root closure not found after construction"
+      case Map.lookup (fst root) remap of
+        Just limboRoot -> do
+          mval <- ascend limboRoot
+          return $ case mval of
+            Just val -> return (VacuumTube val :: VacuumTube a)
+            Nothing  -> fail "Ascension failed"
+        Nothing -> return $ fail "Root closure not found after construction"
 
 data EncodedState = EncodedState
-  { encodedRoot  :: VacuumNode
-  , encodedStack :: [VacuumNode]
-  , encodedNodes :: Set VacuumNode
-  , encodedPayloads :: Map (Ptr Closure) (Map Word Payload)
+  { encodedRoot  :: Maybe (Ptr Closure, VacuumNode)
+  , encodedStack :: [(Ptr Closure, VacuumNode)]
+  , encodedNodes :: Map (Ptr Closure) VacuumNode
   } deriving (Show, Generic)
 
 instance Binary EncodedState
@@ -140,23 +150,20 @@ encodeObject val enc = ST $ \ st ->
     (# st', res #) -> (# st', unsafeCoerce# res :: EncodedState #)
 
 popTag :: EncodedState -> EncodedState
-popTag (EncodedState root (top:stack) erry st) =
-  traceShow ("pop", top) (EncodedState root stack erry st)
+popTag (EncodedState _ (x@(ptr, closure):xs) graph) =
+  traceShow ("pop", closure) (EncodedState (Just x) xs (Map.insert ptr closure graph))
 
 pushTag :: Word# -> Addr# -> Word# -> Word# -> Addr# -> EncodedState -> EncodedState
-pushTag tag# infoTable# ptrs# nptrs# closure# (EncodedState root stack erry st) =
-  let self = VacuumNode (Ptr infoTable#) (W# ptrs#) (W# nptrs#) (Ptr closure#)
-      root' | List.null stack = self
-            | otherwise = root
-      encst = EncodedState root' (self:stack) (Set.insert self erry) (Map.insert (Ptr closure#) Map.empty st)
+pushTag tag# infoTable# ptrs# nptrs# closure# st@EncodedState{encodedStack = xs, encodedNodes} =
+  let ptr = Ptr closure#
+      node = VacuumClosure{vacuumInfoTable = Ptr infoTable#, vacuumPayload = Map.empty}
+      encst = st{encodedStack = (Ptr closure#, VacuumStatic):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("push", W# tag#, Ptr infoTable#, Ptr closure#) encst
 
 pushStatic :: Addr# -> EncodedState -> EncodedState
-pushStatic closure# (EncodedState root stack erry st) =
-  let self = VacuumStatic (Ptr closure#)
-      root' | List.null stack = self
-            | otherwise = root
-      encst = EncodedState root' (self:stack) (Set.insert self erry) (Map.insert (Ptr closure#) Map.empty st)
+pushStatic closure# st@EncodedState{encodedStack = xs, encodedNodes} =
+  let ptr = Ptr closure#
+      encst = st{encodedStack = (Ptr closure#, VacuumStatic):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("static", Ptr closure#) encst
 
 unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
@@ -164,28 +171,26 @@ unsupportedTag _tag# _infoTable# _closure# EncodedState{} =
   error "omg"
 
 yieldPtr :: Word# -> Addr# -> EncodedState -> ST s EncodedState
-yieldPtr slot# ptr# (EncodedState root stack@(VacuumNode{vacuumClosure = top}:_) erry st) | traceShow ("ptr", Ptr ptr#) True =
+yieldPtr slot# ptr# st@EncodedState{encodedStack = (k, !v):xs, encodedNodes} = do
   let ptr = Ptr ptr#
-      payload = PtrPayload ptr
-      addr = unsafeCoerce# ptr# :: Any
-      insertPayload
-        | Map.member ptr st' = return $ EncodedState root stack erry st'
-        | otherwise = encodeObject addr (EncodedState root stack erry (Map.insertWith mappend ptr Map.empty st'))
-        where st' = Map.insertWith mappend top (Map.singleton (W# slot#) payload) st
+      v'  = v{vacuumPayload = Map.insert (W# slot#) (PtrPayload ptr) (vacuumPayload v)}
+      st' = st{encodedStack = (k, v'):xs}
 
-  in insertPayload
+  if (Map.member ptr encodedNodes)
+    then return st'
+    else encodeObject (unsafeCoerce# ptr# :: Any) st'
 
 yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
-yieldNPtr slot# val# (EncodedState root stack@(VacuumNode{vacuumClosure = top}:_) erry st) = traceShow ("nptr", W# val#)
-  (EncodedState root stack erry (Map.insertWith mappend top (Map.singleton (W# slot#) (NPtrPayload (W# val#))) st))
+yieldNPtr slot# val# st@EncodedState{encodedStack = (k, !v):xs} =
+  let v' = v{vacuumPayload = Map.insert (W# slot#) (NPtrPayload (W# val#)) (vacuumPayload v)}
+  in st{encodedStack = (k, v'):xs}
 
 yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-yieldArrWords slot# arr# (EncodedState root stack@(VacuumNode{vacuumClosure = top}:_) erry st) =
+yieldArrWords slot# arr# st@EncodedState{encodedStack = (k, !v):xs} =
   let bytes  = fromIntegral $ I# (sizeofByteArray# arr#)
       uarray = UArray 1 bytes (fromIntegral bytes) arr#
-      set'   = Map.singleton (W# slot#) (ArrayPayload uarray)
-  in traceShow ("bytes", bytes, Ptr (unsafeCoerce# arr#))
-  (EncodedState root stack erry (Map.insertWith mappend top set' st))
+      v'     = v{vacuumPayload = Map.insert (W# slot#) (ArrayPayload uarray) (vacuumPayload v)}
+  in st{encodedStack = (k, v'):xs}
 
 data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: a}
 type Tag = Word
@@ -204,14 +209,10 @@ allocateClosure (Ptr infoTable#) (W# ptrs#) (W# nptrs#) = ST  $ \ st ->
 
 limbo :: forall a s . Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s a)
 limbo infoTable ptrs nptrs = do
-  unsafeIOToST . traceIO $ show ("allocating", infoTable)
-
-  clos@(Ptr clos#) <- allocateClosure infoTable ptrs nptrs
-
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  unsafeIOToST . traceIO $ show ("allocated", clos, ptrSet, nptrSet)
+  Ptr clos# <- allocateClosure infoTable ptrs nptrs
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
@@ -220,8 +221,8 @@ limbo infoTable ptrs nptrs = do
 
 limboStatic :: forall a s . Ptr Closure -> ST s (Limbo s a)
 limboStatic (Ptr clos#) = do
-  ptrRef  <- newSTRef $ Set.empty
-  nptrRef <- newSTRef $ Set.empty
+  ptrRef  <- newSTRef Set.empty
+  nptrRef <- newSTRef Set.empty
 
   return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos# :: a}
 
@@ -234,26 +235,18 @@ setByteArray Limbo{limboPtrs = ptrRef, limboVal = closure} slot arr# = do
 
 setPtr :: Limbo s a -> Word -> Limbo s Any -> ST s ()
 {-# NOINLINE setPtr #-}
-setPtr Limbo{limboPtrs = ptrRef, limboVal = closure} slot@(W# slot#) Limbo{limboVal = val}
-  -- | traceShow ("setPtr", Ptr (unsafeCoerce# closure), slot, Ptr (unsafeCoerce# val)) False = undefined
-  | otherwise = do
-      unsafeIOToST . putStrLn $ "setPtr begin"
+setPtr Limbo{limboPtrs = ptrRef, limboVal = closure} slot@(W# slot#) Limbo{limboVal = val} = do
+  ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure :: Any) slot# val st of
+    (# st' #) -> (# st', () #)
 
-      ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure :: Any) slot# val st of
-        (# st' #) -> (# st', () #)
-
-      unsafeIOToST . putStrLn $ "setPtr done"
-
-      modifySTRef' ptrRef (Set.delete slot)
+  modifySTRef' ptrRef (Set.delete slot)
 
 setNPtr :: Limbo s a -> Word -> Word -> ST s ()
-setNPtr Limbo{limboNPtrs = nptrRef, limboVal = closure} slot@(W# slot#) val@(W# val#)
-  -- | traceShow ("setPtr", Ptr (unsafeCoerce# closure), slot, val) False = undefined
-  | otherwise = do
-      ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure :: Any) slot# val# st of
-        (# st' #) -> (# st', () #)
+setNPtr Limbo{limboNPtrs = nptrRef, limboVal = closure} slot@(W# slot#) (W# val#) = do
+  ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure :: Any) slot# val# st of
+    (# st' #) -> (# st', () #)
 
-      modifySTRef' nptrRef (Set.delete slot)
+  modifySTRef' nptrRef (Set.delete slot)
 
 ascend :: forall a s . Limbo s Any -> ST s (Maybe a)
 {-# NOINLINE ascend #-}

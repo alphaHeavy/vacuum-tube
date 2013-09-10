@@ -55,7 +55,6 @@ WalkGraph_setPtr (P_ a, W_ i, P_ v)
 WalkGraph_indirectByteArray (P_ a, P_ v)
 {
   OVERWRITING_CLOSURE(a);
-  // SET_HDR(a, stg_IND_info+SIZEOF_StgInfoTable, CCCS);
   SET_INFO(a, stg_IND_info);
   StgInd_indirectee(a) = v;
   return ();
