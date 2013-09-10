@@ -18,6 +18,7 @@ import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Array.Base
 import Data.Binary
 import Data.Foldable
+import Data.Graph
 import Data.Map.Lazy as Map
 import Data.Monoid hiding (Any)
 import Data.STRef
@@ -49,16 +50,18 @@ countPayload = e . foldMap s where
   s PtrPayload{}   = (Sum 1, Sum 0)
   s NPtrPayload{}  = (Sum 0, Sum 1)
 
-allocateClosures :: LimboMap s Any -> (Ptr Closure, VacuumNode) -> ST s (LimboMap s Any)
-allocateClosures remap (closure, node) = case node of
+allocateClosures :: LimboMap s Any -> SCC (Ptr Closure, VacuumNode) -> ST s (LimboMap s Any)
+allocateClosures remap (AcyclicSCC (closure, node)) = case node of
   VacuumClosure infoTable payload -> do
     let (ptrs, nptrs) = countPayload payload
     l <- limboClosure infoTable ptrs nptrs
+    setPayload remap l payload
     return $! Map.insert closure l remap
 
   VacuumThunk infoTable payload -> do
     let (ptrs, nptrs) = countPayload payload
     l <- limboThunk infoTable ptrs nptrs
+    setPayload remap l payload
     return $! Map.insert closure l remap
 
   VacuumArray infoTable payload -> do
@@ -76,19 +79,24 @@ setPayload remap l = traverse_ (uncurry step) . Map.toList where
     | otherwise = trace ("ptr nomatch") $ error "foo" -- setPtr l k (vacuumInfoTable 
   step k (NPtrPayload p) = trace "nptr" $ setNPtr l k p
 
+sccNodeMap :: Map (Ptr Closure) VacuumNode -> [SCC (Ptr Closure, VacuumNode)]
+sccNodeMap = fmap swapAndDropSCC . scc . Map.toList where
+  scc = stronglyConnCompR . fmap pieces
+  ptrElems p = [p | PtrPayload p <- Map.elems p]
+  pieces (k, v) = (v, k, ptrs v)
+  swapAndDrop (v, k, _) = (k, v)
+  swapAndDropSCC (AcyclicSCC x) = AcyclicSCC (swapAndDrop x)
+  swapAndDropSCC (CyclicSCC xs) = CyclicSCC (fmap swapAndDrop xs)
+  ptrs VacuumClosure{vacuumPayload} = ptrElems vacuumPayload
+  ptrs VacuumThunk  {vacuumPayload} = ptrElems vacuumPayload
+  ptrs VacuumArray  {} = []
+  ptrs VacuumStatic {} = []
+
 vacuumGet :: Get a
 vacuumGet = do
   EncodedState (Just root) [] nodeMap <- get
-  traceShow ("root", root, nodeMap) $ runST $ do
-    remap <- foldlM allocateClosures Map.empty (Map.toList nodeMap)
-    unsafeIOToST . traceIO $ "Top: " ++ show (Map.size (Map.intersectionWith (,) remap nodeMap))
-    for_ (Map.intersectionWith (,) remap nodeMap) $ \ (l, v) -> do
-      unsafeIOToST . traceIO $ "Checking: " ++ show v
-      case v of
-        VacuumClosure{vacuumPayload} -> setPayload remap l vacuumPayload
-        VacuumThunk  {vacuumPayload} -> setPayload remap l vacuumPayload
-        VacuumArray  {}              -> return ()
-        VacuumStatic                 -> return ()
+  runST $ do
+    remap <- foldlM allocateClosures Map.empty (sccNodeMap nodeMap)
 
     case Map.lookup (fst root) remap of
       Just limboRoot -> do
@@ -115,7 +123,7 @@ limboClosure infoTable ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  clos <- allocateClosure infoTable ptrs nptrs
+  clos <- traceShow ("allocating", infoTable, ptrs, nptrs) $ allocateClosure infoTable ptrs nptrs
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
