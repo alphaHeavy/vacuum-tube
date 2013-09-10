@@ -9,24 +9,51 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  default-language:    Haskell2010
-  exposed-modules:     GHC.VacuumTube,
-                       GHC.VacuumTube.Limbo,
-                       GHC.VacuumTube.Morgue,
-                       GHC.VacuumTube.VacuumNode,
-                       GHC.VacuumTube.VacuumPtr,
-                       GHC.VacuumTube.Types,
-                       GHC.VacuumTube.EncodedState
-  build-depends:       base >= 4.7, ghc-prim, array, binary, containers, bytestring
-  c-sources:           cbits/Walker.cmm, cbits/Assembler.cmm
-  ghc-options:         -Wall
+  default-language:
+    Haskell2010
+  exposed-modules:
+    GHC.VacuumTube,
+    GHC.VacuumTube.Limbo,
+    GHC.VacuumTube.Morgue,
+    GHC.VacuumTube.VacuumNode,
+    GHC.VacuumTube.VacuumPtr,
+    GHC.VacuumTube.Types,
+    GHC.VacuumTube.EncodedState
+  build-depends:
+    base >= 4.7,
+    ghc-prim,
+    array,
+    binary,
+    bytestring,
+    containers
+  c-sources:
+    cbits/Walker.cmm
+    cbits/Assembler.cmm
+  ghc-options:
+    -Wall
 
 test-suite test
-  main-is:             test.hs
-  type:                exitcode-stdio-1.0
-  default-language:    Haskell2010
-  build-depends:       base, ghc-prim, array, binary, containers, bytestring, vacuum-tube, protobuf
-  ghc-options:         -rtsopts -debug
+  main-is:
+    test.hs
+  type:
+    exitcode-stdio-1.0
+  default-language:
+    Haskell2010
+  build-depends:
+    base,
+    ghc-prim,
+    array,
+    binary,
+    containers,
+    bytestring,
+    vacuum-tube,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
+    HUnit                      >= 1.2,
+    QuickCheck                 >= 2.4
+  ghc-options:
+    -rtsopts -debug
 
 source-repository head
   type:     git
