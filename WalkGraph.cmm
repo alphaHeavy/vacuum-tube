@@ -43,6 +43,43 @@ loop2:
   return (val);
 }
 
+// WalkGraph_allocateThunk :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any, Word#, Word# #)
+WalkGraph_allocateThunk (W_ info, W_ ptrs, W_ nptrs)
+{
+  W_ bytes;
+
+  bytes = SIZEOF_StgThunkHeader + WDS(ptrs) + WDS(nptrs);
+
+  HP_CHK_GEN(bytes);
+
+  P_ val;
+  val = Hp + WDS(1);
+  Hp = Hp + bytes;
+
+  SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
+
+  W_ i;
+  i = 0;
+
+loop1:
+  if (i < ptrs)
+  {
+    StgThunk_payload(val, i) = base_GHCziErr_undefined_closure;
+    i = i + 1;
+    goto loop1;
+  }
+
+loop2:
+  if (i < (ptrs + nptrs))
+  {
+    StgThunk_payload(val, i) = 0;
+    i = i + 1;
+    goto loop2;
+  }
+
+  return (val);
+}
+
 // WalkGraph_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 WalkGraph_setPtr (P_ a, W_ i, P_ v)
 {
@@ -70,14 +107,11 @@ WalkGraph_setNPtr (P_ a, W_ i, W_ v)
 // WalkGraph_dumpArray :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
 WalkGraph_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
-  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, 0, 0, clos, st);
+  // Serialize.pushArrWords :: Addr# -> Addr# -> ByteArray# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushArrWords_info) (Serializze_pushArrWords_closure, info, clos, st);
 
-  // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-  (P_ sty) = call %ENTRY_CODE(Serializze_yieldArrWords_info) (Serializze_yieldArrWords_info, 0, clos, stx);
-
-  // popTag :: EncodedState -> EncodedState
-  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, sty);
+  // popState :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popState_info) (Serializze_popState_closure, stx);
 }
 
 WalkGraph_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
@@ -86,8 +120,8 @@ WalkGraph_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
   ptrs = TO_W_(%INFO_PTRS(info));
   nptrs = TO_W_(%INFO_NPTRS(info));
 
-  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, ptrs, nptrs, clos, st);
+  // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushClosure_info) (Serializze_pushClosure_closure, type, info, ptrs, nptrs, clos, st);
 
   W_ ptrs;
   ptrs = TO_W_(%INFO_PTRS(info));
@@ -97,24 +131,24 @@ WalkGraph_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
 // WalkGraph_dumpIndirection :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
 WalkGraph_dumpIndirection (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
-  // Serialize.pushTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushTag_info) (Serializze_pushTag_info, type, info, 1, 0, clos, st);
+  // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushClosure_info) (Serializze_pushClosure_closure, type, info, 1, 0, clos, st);
 
   // // // Serialize.yieldArrWords :: Word# -> ByteArray# -> EncodedState -> EncodedState
-  (P_ sty) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, 0, UNTAG(StgInd_indirectee(clos)), stx);
+  (P_ sty) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_closure, 0, UNTAG(StgInd_indirectee(clos)), stx);
 
-  // popTag :: EncodedState -> EncodedState
-  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, sty);
+  // popState :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popState_info) (Serializze_popState_closure, sty);
 }
 
 // WalkGraph_dumpStatic :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
 WalkGraph_dumpStatic (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushStatic :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-  (P_ stx) = call %ENTRY_CODE(Serializze_pushStatic_info) (Serializze_pushTag_info, clos, st);
+  (P_ stx) = call %ENTRY_CODE(Serializze_pushStatic_info) (Serializze_pushStatic_closure, clos, st);
 
-  // popTag :: EncodedState -> EncodedState
-  jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, stx);
+  // popState :: EncodedState -> EncodedState
+  jump %ENTRY_CODE(Serializze_popState_info) (Serializze_popState_closure, stx);
 }
 
 // Entry point in the Cmm side to walk the value graph pointed to from a
@@ -123,7 +157,6 @@ WalkGraph_dumpStatic (P_ a, W_ clos, W_ info, W_ type, P_ st)
 // WalkGraph_encodeObject :: a -> EncodedState -> EncodedState
 WalkGraph_encodeObject (P_ a, P_ st)
 {
-AGAIN:
   W_ clos, info, type;
   clos = UNTAG(a);
   if (clos == 0)
@@ -192,7 +225,7 @@ AGAIN:
     {
 FAIL:
       // Serialize.unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
-      jump %ENTRY_CODE(Serializze_unsupportedTag_info) (Serializze_unsupportedTag_info, type, info, clos, st);
+      jump %ENTRY_CODE(Serializze_unsupportedTag_info) (Serializze_unsupportedTag_closure, type, info, clos, st);
     }
   }
 }
@@ -203,7 +236,7 @@ WalkGraph_dumpPtrs (P_ clos, W_ p, W_ lim, P_ st)
   if (p < lim)
   {
     // yieldPtr :: Word# -> Addr# -> EncodedState -> EncodedState
-    (P_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_info, p, UNTAG(StgClosure_payload(clos, p)), st);
+    (P_ stx) = call %ENTRY_CODE(Serializze_yieldPtr_info) (Serializze_yieldPtr_closure, p, UNTAG(StgClosure_payload(clos, p)), st);
     jump WalkGraph_dumpPtrs (clos, p + 1, lim, stx);
   }
   else
@@ -222,12 +255,12 @@ WalkGraph_dumpNPtrs (P_ clos, W_ p, W_ lim, P_ st)
   if (p < lim)
   {
     // yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
-    (P_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_info, p, StgClosure_payload(clos, p), st);
+    (P_ stx) = call %ENTRY_CODE(Serializze_yieldNPtr_info) (Serializze_yieldNPtr_closure, p, StgClosure_payload(clos, p), st);
     jump WalkGraph_dumpNPtrs (clos, p + 1, lim, stx);
   }
   else
   {
-    // popTag :: EncodedState -> EncodedState
-    jump %ENTRY_CODE(Serializze_popTag_info) (Serializze_popTag_info, st);
+    // popState :: EncodedState -> EncodedState
+    jump %ENTRY_CODE(Serializze_popState_info) (Serializze_popState_closure, st);
   }
 }
