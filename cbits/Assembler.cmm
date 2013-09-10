@@ -78,15 +78,14 @@ loop2:
 // VacuumAssembler_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 VacuumAssembler_setPtr (P_ a, W_ i, P_ v)
 {
-  OVERWRITING_CLOSURE(a);
   StgClosure_payload(a, i) = v;
+  ccall recordClosureMutated(MyCapability() "ptr", a);
   return ();
 }
 
 // VacuumAssembler_indirectByteArray :: Addr# -> ByteArray# -> State# s -> (# State# s #)
 VacuumAssembler_indirectByteArray (P_ a, P_ v)
 {
-  OVERWRITING_CLOSURE(a);
   SET_INFO(a, stg_IND_info);
   StgInd_indirectee(a) = v;
   return ();
