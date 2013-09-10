@@ -1,0 +1,100 @@
+#include <Cmm.h>
+
+// VacuumAssembler_allocateClosure :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any, Word#, Word# #)
+VacuumAssembler_allocateClosure (W_ info, W_ ptrs, W_ nptrs)
+{
+  W_ bytes;
+
+  bytes = SIZEOF_StgHeader + WDS(ptrs) + WDS(nptrs);
+
+  HP_CHK_GEN(bytes);
+
+  P_ val;
+  val = Hp + WDS(1);
+  Hp = Hp + bytes;
+
+  SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
+
+  W_ i;
+  i = 0;
+
+loop1:
+  if (i < ptrs)
+  {
+    // need to stick a valid closure in here for the GC
+    StgClosure_payload(val, i) = base_GHCziErr_undefined_closure;
+    i = i + 1;
+    goto loop1;
+  }
+
+loop2:
+  if (i < (ptrs + nptrs))
+  {
+    StgClosure_payload(val, i) = 0;
+    i = i + 1;
+    goto loop2;
+  }
+
+  return (val);
+}
+
+// VacuumAssembler_allocateThunk :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any, Word#, Word# #)
+VacuumAssembler_allocateThunk (W_ info, W_ ptrs, W_ nptrs)
+{
+  W_ bytes;
+
+  bytes = SIZEOF_StgThunkHeader + WDS(ptrs) + WDS(nptrs);
+
+  HP_CHK_GEN(bytes);
+
+  P_ val;
+  val = Hp + WDS(1);
+  Hp = Hp + bytes;
+
+  SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
+
+  W_ i;
+  i = 0;
+
+loop1:
+  if (i < ptrs)
+  {
+    StgThunk_payload(val, i) = base_GHCziErr_undefined_closure;
+    i = i + 1;
+    goto loop1;
+  }
+
+loop2:
+  if (i < (ptrs + nptrs))
+  {
+    StgThunk_payload(val, i) = 0;
+    i = i + 1;
+    goto loop2;
+  }
+
+  return (val);
+}
+
+// VacuumAssembler_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
+VacuumAssembler_setPtr (P_ a, W_ i, P_ v)
+{
+  OVERWRITING_CLOSURE(a);
+  StgClosure_payload(a, i) = v;
+  return ();
+}
+
+// VacuumAssembler_indirectByteArray :: Addr# -> ByteArray# -> State# s -> (# State# s #)
+VacuumAssembler_indirectByteArray (P_ a, P_ v)
+{
+  OVERWRITING_CLOSURE(a);
+  SET_INFO(a, stg_IND_info);
+  StgInd_indirectee(a) = v;
+  return ();
+}
+
+// VacuumAssembler_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
+VacuumAssembler_setNPtr (P_ a, W_ i, W_ v)
+{
+  StgClosure_payload(a, i) = v;
+  return ();
+}
