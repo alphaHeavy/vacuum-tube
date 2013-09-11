@@ -1,7 +1,6 @@
 #include <Cmm.h>
 
-// VacuumAssembler_allocateClosure :: Addr# -> State# s -> (# State# s, Any #)
-VacuumAssembler_allocateClosure (W_ info)
+VacuumAssembler_allocatePrim (W_ info)
 {
   W_ bytes, stdInfo, ptrs, nptrs;
   stdInfo = %STD_INFO(info);
@@ -15,6 +14,14 @@ VacuumAssembler_allocateClosure (W_ info)
   val = Hp - bytes + WDS(1);
 
   SET_HDR(val, info, CCCS);
+
+  return (val, ptrs, nptrs);
+}
+
+// VacuumAssembler_allocateClosure :: Addr# -> State# s -> (# State# s, Any #)
+VacuumAssembler_allocateClosure (W_ info)
+{
+  (P_ val, W_ ptrs, W_ nptrs) = call VacuumAssembler_allocatePrim (info);
 
   W_ i;
   i = 0;
@@ -42,17 +49,7 @@ loop2:
 // VacuumAssembler_allocateThunk :: Addr# -> State# s -> (# State# s, Any #)
 VacuumAssembler_allocateThunk (W_ info)
 {
-  W_ bytes;
-
-  bytes = SIZEOF_StgThunkHeader + WDS(ptrs) + WDS(nptrs);
-
-  HP_CHK_GEN(bytes);
-
-  P_ val;
-  val = Hp + WDS(1);
-  Hp = Hp + bytes;
-
-  SET_HDR(val, info, CCCS);
+  (P_ val, W_ ptrs, W_ nptrs) = call VacuumAssembler_allocatePrim (info);
 
   W_ i;
   i = 0;
