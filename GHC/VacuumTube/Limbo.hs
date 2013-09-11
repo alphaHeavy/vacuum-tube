@@ -72,7 +72,7 @@ allocateClosures limboMap (AcyclicSCC (closure, node)) = case node of
     l <- limboStatic closure
     return $! Map.insert closure l limboMap
 
-setPayload :: LimboMap s Any -> Limbo s a -> Map Word Payload -> ST s ()
+setPayload :: LimboMap s Any -> Limbo s Any -> Map Word Payload -> ST s ()
 setPayload limboMap l = traverse_ (uncurry step) . Map.toList where
   step k (PtrPayload p)
     | Just p' <- Map.lookup p limboMap = trace ("ptr match") $ setPtr l k p'
@@ -118,7 +118,7 @@ allocateThunk (Ptr infoTable#) (W# ptrs#) (W# nptrs#) = ST  $ \ st ->
   case unsafeAllocateThunk infoTable# ptrs# nptrs# st of
     (# st', clos# #) -> (# st', clos# #)
 
-limboClosure :: forall a s . Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s a)
+limboClosure :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s Any)
 limboClosure infoTable ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
@@ -128,9 +128,9 @@ limboClosure infoTable ptrs nptrs = do
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
 
-  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos :: a}
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = clos}
 
-limboThunk :: forall a s . Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s a)
+limboThunk :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s Any)
 limboThunk infoTable ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
@@ -140,21 +140,21 @@ limboThunk infoTable ptrs nptrs = do
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
 
-  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos :: a}
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = clos}
 
-limboArray :: forall a s . Ptr InfoTable -> UArray Word Word8 -> ST s (Limbo s a)
+limboArray :: Ptr InfoTable -> UArray Word Word8 -> ST s (Limbo s Any)
 limboArray _infoTable (UArray _ _ _ arr) = do
   ptrRef  <- newSTRef Set.empty
   nptrRef <- newSTRef Set.empty
 
-  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# arr :: a}
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# arr :: Any}
 
-limboStatic :: forall a s . Ptr Closure -> ST s (Limbo s a)
+limboStatic :: Ptr Closure -> ST s (Limbo s Any)
 limboStatic (Ptr clos#) = do
   ptrRef  <- newSTRef Set.empty
   nptrRef <- newSTRef Set.empty
 
-  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos# :: a}
+  return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = unsafeCoerce# clos# :: Any}
 
 setByteArray :: Limbo s a -> Word -> ByteArray# -> ST s ()
 setByteArray Limbo{limboPtrs = ptrRef, limboVal = closure} slot arr# = do
@@ -163,17 +163,17 @@ setByteArray Limbo{limboPtrs = ptrRef, limboVal = closure} slot arr# = do
 
   modifySTRef' ptrRef (Set.delete slot)
 
-setPtr :: Limbo s a -> Word -> Limbo s Any -> ST s ()
+setPtr :: Limbo s Any -> Word -> Limbo s Any -> ST s ()
 {-# NOINLINE setPtr #-}
 setPtr Limbo{limboPtrs = ptrRef, limboVal = closure} slot@(W# slot#) Limbo{limboVal = val} = do
-  ST $ \ st -> case unsafeSetPtr (unsafeCoerce# closure :: Any) slot# val st of
+  ST $ \ st -> case unsafeSetPtr closure slot# val st of
     (# st' #) -> (# st', () #)
 
   modifySTRef' ptrRef (Set.delete slot)
 
-setNPtr :: Limbo s a -> Word -> Word -> ST s ()
+setNPtr :: Limbo s Any -> Word -> Word -> ST s ()
 setNPtr Limbo{limboNPtrs = nptrRef, limboVal = closure} slot@(W# slot#) (W# val#) = do
-  ST $ \ st -> case unsafeSetNPtr (unsafeCoerce# closure :: Any) slot# val# st of
+  ST $ \ st -> case unsafeSetNPtr closure slot# val# st of
     (# st' #) -> (# st', () #)
 
   modifySTRef' nptrRef (Set.delete slot)
