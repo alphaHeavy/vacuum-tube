@@ -20,15 +20,14 @@ VacuumWalker_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
 
 VacuumWalker_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
 {
-  W_ ptrs, nptrs;
-  ptrs = TO_W_(%INFO_PTRS(info));
-  nptrs = TO_W_(%INFO_NPTRS(info));
+  W_ stdInfo, ptrs, nptrs;
+  stdInfo = %STD_INFO(info);
+  ptrs = TO_W_(%INFO_PTRS(stdInfo));
+  nptrs = TO_W_(%INFO_NPTRS(stdInfo));
 
   // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
   (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushClosure_closure), type, info, ptrs, nptrs, clos, st);
 
-  W_ ptrs;
-  ptrs = TO_W_(%INFO_PTRS(info));
   jump VacuumWalker_dumpPtrs (clos, 0, ptrs, stx);
 }
 
@@ -75,8 +74,8 @@ VacuumWalker_encodeObject (P_ a, P_ st)
     return (st);
   }
 
-  info = %GET_STD_INFO(clos);
-  type = TO_W_(%INFO_TYPE(info));
+  info = %INFO_PTR(clos);
+  type = TO_W_(%INFO_TYPE(%STD_INFO(info)));
 
   switch [INVALID_OBJECT .. N_CLOSURE_TYPES] (type)
   {

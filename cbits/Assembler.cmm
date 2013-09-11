@@ -13,7 +13,7 @@ VacuumAssembler_allocateClosure (W_ info, W_ ptrs, W_ nptrs)
   val = Hp + WDS(1);
   Hp = Hp + bytes;
 
-  SET_HDR(val, info+SIZEOF_StgInfoTable, CCCS);
+  SET_HDR(val, info, CCCS);
 
   W_ i;
   i = 0;
