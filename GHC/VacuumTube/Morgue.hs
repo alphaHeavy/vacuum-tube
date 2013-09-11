@@ -52,19 +52,19 @@ popState :: EncodedState -> EncodedState
 popState (EncodedState _ (x@(ptr, closure):xs) graph) =
   traceShow ("pop", closure) (EncodedState (Just x) xs (Map.insert ptr closure graph))
 
-pushClosure :: Word# -> Addr# -> Word# -> Word# -> Addr# -> EncodedState -> EncodedState
-pushClosure tag# infoTable# _ptrs# _nptrs# closure# st@EncodedState{encodedStack = xs, encodedNodes} =
+pushClosure :: Word# -> Addr# -> Word# -> Addr# -> EncodedState -> EncodedState
+pushClosure type# infoTable# tag# closure# st@EncodedState{encodedStack = xs, encodedNodes} =
   let ptr = Ptr closure#
-      node = VacuumClosure{vacuumInfoTable = Ptr infoTable#, vacuumPayload = Map.empty}
+      node = VacuumClosure{vacuumInfoTable = Ptr infoTable#, vacuumTag = W# tag#, vacuumPayload = Map.empty}
       encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
-  in traceShow ("closure", W# tag#, Ptr infoTable#, ptr) encst
+  in traceShow ("closure", W# type#, Ptr infoTable#, ptr) encst
 
-pushThunk :: Word# -> Addr# -> Word# -> Word# -> Addr# -> EncodedState -> EncodedState
-pushThunk tag# infoTable# _ptrs# _nptrs# closure# st@EncodedState{encodedStack = xs, encodedNodes} =
+pushThunk :: Word# -> Addr# -> Word# -> Addr# -> EncodedState -> EncodedState
+pushThunk type# infoTable# tag# closure# st@EncodedState{encodedStack = xs, encodedNodes} =
   let ptr = Ptr closure#
-      node = VacuumThunk{vacuumInfoTable = Ptr infoTable#, vacuumPayload = Map.empty}
+      node = VacuumThunk{vacuumInfoTable = Ptr infoTable#, vacuumTag = W# tag#, vacuumPayload = Map.empty}
       encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
-  in traceShow ("thunk", W# tag#, Ptr infoTable#, ptr) encst
+  in traceShow ("thunk", W# type#, Ptr infoTable#, ptr) encst
 
 pushArrWords :: Addr# -> ByteArray# -> EncodedState -> EncodedState
 pushArrWords infoTable# arr# st@EncodedState{encodedStack = xs, encodedNodes} =
@@ -75,17 +75,17 @@ pushArrWords infoTable# arr# st@EncodedState{encodedStack = xs, encodedNodes} =
       encst  = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("arr", Ptr infoTable#, ptr) encst
 
-pushSelector :: Addr# -> Addr# -> Addr# -> EncodedState -> EncodedState
-pushSelector infoTable# closure# selectee# st@EncodedState{encodedStack = xs, encodedNodes} =
+pushSelector :: Addr# -> Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+pushSelector infoTable# tag# closure# selectee# st@EncodedState{encodedStack = xs, encodedNodes} =
   let ptr = Ptr closure#
-      node = VacuumSelector{vacuumInfoTable = Ptr infoTable#, vacuumSelectee = Ptr selectee#}
+      node = VacuumSelector{vacuumInfoTable = Ptr infoTable#, vacuumTag = W# tag#, vacuumSelectee = Ptr selectee#}
       encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("selector", Ptr infoTable#, ptr) encst
 
-pushIndirection :: Addr# -> Addr# -> Addr# -> EncodedState -> EncodedState
-pushIndirection infoTable# closure# indirectee# st@EncodedState{encodedStack = xs, encodedNodes} =
+pushIndirection :: Addr# -> Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
+pushIndirection infoTable# tag# closure# indirectee# st@EncodedState{encodedStack = xs, encodedNodes} =
   let ptr = Ptr closure#
-      node = VacuumInd{vacuumInfoTable = Ptr infoTable#, vacuumIndirectee = Ptr indirectee#}
+      node = VacuumInd{vacuumInfoTable = Ptr infoTable#, vacuumTag = W# tag#, vacuumIndirectee = Ptr indirectee#}
       encst = st{encodedStack = (ptr, node):xs, encodedNodes = Map.insert ptr VacuumUndefined encodedNodes}
   in traceShow ("indirection", Ptr infoTable#, ptr) encst
 

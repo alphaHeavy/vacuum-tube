@@ -35,8 +35,8 @@ import GHC.VacuumTube.VacuumNode
 
 import Debug.Trace
 
-foreign import prim "VacuumAssembler_allocateClosure" unsafeAllocateClosure :: Addr# -> State# s -> (# State# s, Any #)
-foreign import prim "VacuumAssembler_allocateThunk" unsafeAllocateThunk :: Addr# -> State# s -> (# State# s, Any #)
+foreign import prim "VacuumAssembler_allocateClosure" unsafeAllocateClosure :: Addr# -> Word# -> State# s -> (# State# s, Any #)
+foreign import prim "VacuumAssembler_allocateThunk" unsafeAllocateThunk :: Addr# -> Word# -> State# s -> (# State# s, Any #)
 foreign import prim "VacuumAssembler_setPtr" unsafeSetPtr :: Any -> Word# -> Any -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_setNPtr" unsafeSetNPtr :: Any -> Word# -> Word# -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_indirectByteArray" unsafeIndirectByteArray :: Any -> ByteArray# -> State# s -> (# State# s #)
@@ -52,15 +52,15 @@ countPayload = e . foldMap s where
 
 allocateClosures :: LimboMap s Any -> SCC (Ptr Closure, VacuumNode) -> ST s (LimboMap s Any)
 allocateClosures limboMap (AcyclicSCC (closure, node)) = case node of
-  VacuumClosure infoTable payload -> do
+  VacuumClosure infoTable tag payload -> do
     let (ptrs, nptrs) = countPayload payload
-    l <- limboClosure infoTable ptrs nptrs
+    l <- limboClosure infoTable tag ptrs nptrs
     setPayload limboMap l payload
     return $! Map.insert closure l limboMap
 
-  VacuumThunk infoTable payload -> do
+  VacuumThunk infoTable tag payload -> do
     let (ptrs, nptrs) = countPayload payload
-    l <- limboThunk infoTable ptrs nptrs
+    l <- limboThunk infoTable tag ptrs nptrs
     setPayload limboMap l payload
     return $! Map.insert closure l limboMap
 
@@ -108,34 +108,34 @@ vacuumGet = do
 
 data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: a}
 
-allocateClosure :: Ptr InfoTable -> ST s Any
-allocateClosure (Ptr infoTable#) = ST  $ \ st ->
-  case unsafeAllocateClosure infoTable# st of
+allocateClosure :: Ptr InfoTable -> PointerTag -> ST s Any
+allocateClosure (Ptr infoTable#) (W# tag#) = ST  $ \ st ->
+  case unsafeAllocateClosure infoTable# tag# st of
     (# st', clos# #) -> (# st', clos# #)
 
-allocateThunk :: Ptr InfoTable -> ST s Any
-allocateThunk (Ptr infoTable#) = ST  $ \ st ->
-  case unsafeAllocateThunk infoTable# st of
+allocateThunk :: Ptr InfoTable -> PointerTag -> ST s Any
+allocateThunk (Ptr infoTable#) (W# tag#) = ST  $ \ st ->
+  case unsafeAllocateThunk infoTable# tag# st of
     (# st', clos# #) -> (# st', clos# #)
 
-limboClosure :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s Any)
-limboClosure infoTable ptrs nptrs = do
+limboClosure :: Ptr InfoTable -> PointerTag -> Ptrs -> NPtrs -> ST s (Limbo s Any)
+limboClosure infoTable tag ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  clos <- traceShow ("allocating", infoTable, ptrs, nptrs) $ allocateClosure infoTable
+  clos <- traceShow ("allocating", infoTable, ptrs, nptrs) $ allocateClosure infoTable tag
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
 
   return Limbo{limboPtrs = ptrRef, limboNPtrs = nptrRef, limboVal = clos}
 
-limboThunk :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s Any)
-limboThunk infoTable ptrs nptrs = do
+limboThunk :: Ptr InfoTable -> PointerTag -> Ptrs -> NPtrs -> ST s (Limbo s Any)
+limboThunk infoTable tag ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  clos <- allocateThunk infoTable
+  clos <- allocateThunk infoTable tag
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet

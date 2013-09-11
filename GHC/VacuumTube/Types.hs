@@ -9,6 +9,7 @@ module GHC.VacuumTube.Types
   , Tag
   , Ptrs
   , NPtrs
+  , PointerTag
   ) where
 
 import Control.Applicative
@@ -44,3 +45,4 @@ type ClosureMap a = Map (Ptr Closure) a
 type Tag = Word
 type Ptrs = Word
 type NPtrs = Word
+type PointerTag = Word

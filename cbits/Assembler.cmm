@@ -19,7 +19,7 @@ VacuumAssembler_allocatePrim (W_ info)
 }
 
 // VacuumAssembler_allocateClosure :: Addr# -> State# s -> (# State# s, Any #)
-VacuumAssembler_allocateClosure (W_ info)
+VacuumAssembler_allocateClosure (W_ info, W_ tag)
 {
   (P_ val, W_ ptrs, W_ nptrs) = call VacuumAssembler_allocatePrim (info);
 
@@ -43,11 +43,11 @@ loop2:
     goto loop2;
   }
 
-  return (val);
+  return (val | tag);
 }
 
 // VacuumAssembler_allocateThunk :: Addr# -> State# s -> (# State# s, Any #)
-VacuumAssembler_allocateThunk (W_ info)
+VacuumAssembler_allocateThunk (W_ info, W_ tag)
 {
   (P_ val, W_ ptrs, W_ nptrs) = call VacuumAssembler_allocatePrim (info);
 
@@ -70,14 +70,16 @@ loop2:
     goto loop2;
   }
 
-  return (val);
+  return (val | tag);
 }
 
 // VacuumAssembler_setPtr :: Addr# -> Word# -> Addr# -> State# s -> (# State# s #)
 VacuumAssembler_setPtr (P_ a, W_ i, P_ v)
 {
-  StgClosure_payload(a, i) = v;
-  ccall recordClosureMutated(MyCapability() "ptr", a);
+  P_ t;
+  t = UNTAG(a);
+  StgClosure_payload(t, i) = v;
+  ccall recordClosureMutated(MyCapability() "ptr", t);
   return ();
 }
 
@@ -92,6 +94,6 @@ VacuumAssembler_indirectByteArray (P_ a, P_ v)
 // VacuumAssembler_setNPtr :: Addr# -> Word# -> Word# -> State# s -> (# State# s #)
 VacuumAssembler_setNPtr (P_ a, W_ i, W_ v)
 {
-  StgClosure_payload(a, i) = v;
+  StgClosure_payload(UNTAG(a), i) = v;
   return ();
 }
