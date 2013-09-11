@@ -12,8 +12,7 @@ VacuumAssembler_allocateClosure (W_ info)
   HP_CHK_GEN(bytes);
 
   P_ val;
-  val = Hp + WDS(1);
-  Hp = Hp + bytes;
+  val = Hp - bytes + WDS(1);
 
   SET_HDR(val, info, CCCS);
 
