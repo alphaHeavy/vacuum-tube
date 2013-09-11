@@ -35,8 +35,8 @@ import GHC.VacuumTube.VacuumNode
 
 import Debug.Trace
 
-foreign import prim "VacuumAssembler_allocateClosure" unsafeAllocateClosure :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any #)
-foreign import prim "VacuumAssembler_allocateThunk" unsafeAllocateThunk :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any #)
+foreign import prim "VacuumAssembler_allocateClosure" unsafeAllocateClosure :: Addr# -> State# s -> (# State# s, Any #)
+foreign import prim "VacuumAssembler_allocateThunk" unsafeAllocateThunk :: Addr# -> State# s -> (# State# s, Any #)
 foreign import prim "VacuumAssembler_setPtr" unsafeSetPtr :: Any -> Word# -> Any -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_setNPtr" unsafeSetNPtr :: Any -> Word# -> Word# -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_indirectByteArray" unsafeIndirectByteArray :: Any -> ByteArray# -> State# s -> (# State# s #)
@@ -108,14 +108,14 @@ vacuumGet = do
 
 data Limbo s a = Limbo {limboPtrs :: STRef s (Set Word), limboNPtrs :: STRef s (Set Word), limboVal :: a}
 
-allocateClosure :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s Any
-allocateClosure (Ptr infoTable#) (W# ptrs#) (W# nptrs#) = ST  $ \ st ->
-  case unsafeAllocateClosure infoTable# ptrs# nptrs# st of
+allocateClosure :: Ptr InfoTable -> ST s Any
+allocateClosure (Ptr infoTable#) = ST  $ \ st ->
+  case unsafeAllocateClosure infoTable# st of
     (# st', clos# #) -> (# st', clos# #)
 
-allocateThunk :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s Any
-allocateThunk (Ptr infoTable#) (W# ptrs#) (W# nptrs#) = ST  $ \ st ->
-  case unsafeAllocateThunk infoTable# ptrs# nptrs# st of
+allocateThunk :: Ptr InfoTable -> ST s Any
+allocateThunk (Ptr infoTable#) = ST  $ \ st ->
+  case unsafeAllocateThunk infoTable# st of
     (# st', clos# #) -> (# st', clos# #)
 
 limboClosure :: Ptr InfoTable -> Ptrs -> NPtrs -> ST s (Limbo s Any)
@@ -123,7 +123,7 @@ limboClosure infoTable ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  clos <- traceShow ("allocating", infoTable, ptrs, nptrs) $ allocateClosure infoTable ptrs nptrs
+  clos <- traceShow ("allocating", infoTable, ptrs, nptrs) $ allocateClosure infoTable
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
@@ -135,7 +135,7 @@ limboThunk infoTable ptrs nptrs = do
   let ptrSet  = Set.fromList [i-1      | i <- [1..ptrs]]
       nptrSet = Set.fromList [i+ptrs-1 | i <- [1..nptrs]]
 
-  clos <- allocateThunk infoTable ptrs nptrs
+  clos <- allocateThunk infoTable
 
   ptrRef  <- newSTRef ptrSet
   nptrRef <- newSTRef nptrSet
