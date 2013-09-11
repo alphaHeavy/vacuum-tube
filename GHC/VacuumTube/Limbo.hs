@@ -38,8 +38,8 @@ import Debug.Trace
 foreign import prim "VacuumAssembler_allocateClosure" unsafeAllocateClosure :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any #)
 foreign import prim "VacuumAssembler_allocateThunk" unsafeAllocateThunk :: Addr# -> Word# -> Word# -> State# s -> (# State# s, Any #)
 foreign import prim "VacuumAssembler_setPtr" unsafeSetPtr :: Any -> Word# -> Any -> State# s -> (# State# s #)
-foreign import prim "VacuumAssembler_indirectByteArray" unsafeIndirectByteArray :: Any -> ByteArray# -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_setNPtr" unsafeSetNPtr :: Any -> Word# -> Word# -> State# s -> (# State# s #)
+foreign import prim "VacuumAssembler_indirectByteArray" unsafeIndirectByteArray :: Any -> ByteArray# -> State# s -> (# State# s #)
 foreign import prim "VacuumAssembler_getInfoTable" unsafeGetInfoTable :: Any -> State# s -> (# State# s, Addr# #)
 
 type LimboMap s a = ClosureMap (Limbo s a)
@@ -51,31 +51,31 @@ countPayload = e . foldMap s where
   s NPtrPayload{}  = (Sum 0, Sum 1)
 
 allocateClosures :: LimboMap s Any -> SCC (Ptr Closure, VacuumNode) -> ST s (LimboMap s Any)
-allocateClosures remap (AcyclicSCC (closure, node)) = case node of
+allocateClosures limboMap (AcyclicSCC (closure, node)) = case node of
   VacuumClosure infoTable payload -> do
     let (ptrs, nptrs) = countPayload payload
     l <- limboClosure infoTable ptrs nptrs
-    setPayload remap l payload
-    return $! Map.insert closure l remap
+    setPayload limboMap l payload
+    return $! Map.insert closure l limboMap
 
   VacuumThunk infoTable payload -> do
     let (ptrs, nptrs) = countPayload payload
     l <- limboThunk infoTable ptrs nptrs
-    setPayload remap l payload
-    return $! Map.insert closure l remap
+    setPayload limboMap l payload
+    return $! Map.insert closure l limboMap
 
   VacuumArray infoTable payload -> do
     l <- limboArray infoTable payload
-    return $! Map.insert closure l remap
+    return $! Map.insert closure l limboMap
 
   VacuumStatic -> do
     l <- limboStatic closure
-    return $! Map.insert closure l remap
+    return $! Map.insert closure l limboMap
 
 setPayload :: LimboMap s Any -> Limbo s a -> Map Word Payload -> ST s ()
-setPayload remap l = traverse_ (uncurry step) . Map.toList where
+setPayload limboMap l = traverse_ (uncurry step) . Map.toList where
   step k (PtrPayload p)
-    | Just p' <- Map.lookup p remap = trace ("ptr match") $ setPtr l k p'
+    | Just p' <- Map.lookup p limboMap = trace ("ptr match") $ setPtr l k p'
     | otherwise = trace ("ptr nomatch") $ error "foo" -- setPtr l k (vacuumInfoTable 
   step k (NPtrPayload p) = trace "nptr" $ setNPtr l k p
 
@@ -94,11 +94,11 @@ sccNodeMap = fmap swapAndDropSCC . scc . Map.toList where
 
 vacuumGet :: Get a
 vacuumGet = do
-  EncodedState (Just root) [] nodeMap <- get
+  EncodedState (Just (root, _)) [] nodeMap <- get
   runST $ do
-    remap <- foldlM allocateClosures Map.empty (sccNodeMap nodeMap)
+    limboMap <- foldlM allocateClosures Map.empty (sccNodeMap nodeMap)
 
-    case Map.lookup (fst root) remap of
+    case Map.lookup root limboMap of
       Just limboRoot -> do
         mval <- ascend limboRoot
         return $ case mval of
