@@ -145,32 +145,34 @@ FAIL:
 }
 
 // Call yieldPtr for each pointer payload then call dumpNPtrs for the rest
-VacuumWalker_dumpPtrs (P_ clos, W_ p, W_ lim, P_ st)
+VacuumWalker_dumpPtrs (P_ clos, W_ i, W_ lim, P_ st)
 {
-  if (p < lim)
+  if (i < lim)
   {
     // yieldPtr :: Word# -> Addr# -> EncodedState -> EncodedState
-    (P_ stx) = call %ENTRY_CODE(INPKG(yieldPtr_info)) (INPKG(yieldPtr_closure), p, UNTAG(StgClosure_payload(clos, p)), st);
-    jump VacuumWalker_dumpPtrs (clos, p + 1, lim, stx);
+    P_ val;
+    val = StgClosure_payload(clos, i);
+    (P_ stx) = call %ENTRY_CODE(INPKG(yieldPtr_info)) (INPKG(yieldPtr_closure), i, val, UNTAG(val), st);
+    jump VacuumWalker_dumpPtrs (clos, i + 1, lim, stx);
   }
   else
   {
     W_ info, nptrs;
     info = %GET_STD_INFO(clos);
     nptrs = TO_W_(%INFO_NPTRS(info));
-    jump VacuumWalker_dumpNPtrs (clos, p, lim + nptrs, st);
+    jump VacuumWalker_dumpNPtrs (clos, i, lim + nptrs, st);
   }
 }
 
 // Call yieldNPtr for each non-pointer payload then pop the current value off
 // the serialization stack, continuing on our walk
-VacuumWalker_dumpNPtrs (P_ clos, W_ p, W_ lim, P_ st)
+VacuumWalker_dumpNPtrs (P_ clos, W_ i, W_ lim, P_ st)
 {
-  if (p < lim)
+  if (i < lim)
   {
     // yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
-    (P_ stx) = call %ENTRY_CODE(INPKG(yieldNPtr_info)) (INPKG(yieldNPtr_closure), p, StgClosure_payload(clos, p), st);
-    jump VacuumWalker_dumpNPtrs (clos, p + 1, lim, stx);
+    (P_ stx) = call %ENTRY_CODE(INPKG(yieldNPtr_info)) (INPKG(yieldNPtr_closure), i, StgClosure_payload(clos, i), st);
+    jump VacuumWalker_dumpNPtrs (clos, i + 1, lim, stx);
   }
   else
   {
