@@ -9,7 +9,7 @@ VacuumWalker_getInfoTable (P_ a)
 }
 
 // VacuumWalker_dumpArray :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
-VacuumWalker_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
+VacuumWalker_dumpArray (P_ a, P_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushArrWords :: Addr# -> Addr# -> ByteArray# -> EncodedState -> EncodedState
   (P_ stx) = call %ENTRY_CODE(INPKG(pushArrWords_info)) (INPKG(pushArrWords_closure), info, clos, st);
@@ -18,7 +18,7 @@ VacuumWalker_dumpArray (P_ a, W_ clos, W_ info, W_ type, P_ st)
   jump %ENTRY_CODE(INPKG(popState_info)) (INPKG(popState_closure), stx);
 }
 
-VacuumWalker_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
+VacuumWalker_dumpClosure (P_ a, P_ clos, W_ info, W_ type, P_ st)
 {
   W_ ptrs;
   ptrs = TO_W_(%INFO_PTRS(%STD_INFO(info)));
@@ -30,7 +30,7 @@ VacuumWalker_dumpClosure (P_ a, W_ clos, W_ info, W_ type, P_ st)
 }
 
 // VacuumWalker_dumpIndirection :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
-VacuumWalker_dumpIndirection (P_ a, W_ clos, W_ info, W_ type, P_ st)
+VacuumWalker_dumpIndirection (P_ a, P_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
   (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushIndirection_closure), info, GETTAG(a), clos, UNTAG(StgInd_indirectee(clos)), st);
@@ -40,7 +40,7 @@ VacuumWalker_dumpIndirection (P_ a, W_ clos, W_ info, W_ type, P_ st)
 }
 
 // VacuumWalker_dumpSelector :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
-VacuumWalker_dumpSelector (P_ a, W_ clos, W_ info, W_ type, P_ st)
+VacuumWalker_dumpSelector (P_ a, P_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushClosure :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
   (P_ stx) = call %ENTRY_CODE(INPKG(pushClosure_info)) (INPKG(pushSelector_closure), info, GETTAG(a), clos, UNTAG(StgThunk_payload(clos, 0)), st);
@@ -50,7 +50,7 @@ VacuumWalker_dumpSelector (P_ a, W_ clos, W_ info, W_ type, P_ st)
 }
 
 // VacuumWalker_dumpStatic :: Addr# -> Word# -> Word# -> Word# -> EncodedState -> (# EncodedStates #)
-VacuumWalker_dumpStatic (P_ a, W_ clos, W_ info, W_ type, P_ st)
+VacuumWalker_dumpStatic (P_ a, P_ clos, W_ info, W_ type, P_ st)
 {
   // Serialize.pushStatic :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
   (P_ stx) = call %ENTRY_CODE(INPKG(pushStatic_info)) (INPKG(pushStatic_closure), clos, st);
@@ -65,13 +65,14 @@ VacuumWalker_dumpStatic (P_ a, W_ clos, W_ info, W_ type, P_ st)
 // VacuumWalker_encodeObject :: a -> EncodedState -> EncodedState
 VacuumWalker_encodeObject (P_ a, P_ st)
 {
-  W_ clos, info, type;
+  P_ clos;
   clos = UNTAG(a);
   if (clos == 0)
   {
     return (st);
   }
 
+  W_ info, type;
   info = %INFO_PTR(clos);
   type = TO_W_(%INFO_TYPE(%STD_INFO(info)));
 
