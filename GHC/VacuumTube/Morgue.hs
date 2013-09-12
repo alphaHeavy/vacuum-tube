@@ -99,15 +99,15 @@ unsupportedTag :: Word# -> Addr# -> Addr# -> EncodedState -> EncodedState
 unsupportedTag _tag# _infoTable# _closure# EncodedState{} =
   error "omg"
 
-yieldPtr :: Word# -> Addr# -> EncodedState -> ST s EncodedState
-yieldPtr slot# ptr# st@EncodedState{encodedStack = (k, !v):xs, encodedNodes} = do
-  let ptr = Ptr ptr#
+yieldPtr :: Word# -> Any -> EncodedState -> ST s EncodedState
+yieldPtr slot# val st@EncodedState{encodedStack = (k, !v):xs, encodedNodes} = do
+  let ptr = Ptr (unsafeCoerce# val :: Addr#)
       v'  = v{vacuumPayload = Map.insert (W# slot#) (PtrPayload ptr) (vacuumPayload v)}
       st' = st{encodedStack = (k, v'):xs}
 
   if Map.member ptr encodedNodes
     then return st'
-    else encodeObject (unsafeCoerce# ptr# :: Any) st'
+    else encodeObject val st'
 
 yieldNPtr :: Word# -> Word# -> EncodedState -> EncodedState
 yieldNPtr slot# val# st@EncodedState{encodedStack = (k, !v):xs} =
