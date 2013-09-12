@@ -16,7 +16,7 @@ import GHC.VacuumTube.VacuumNode
 data EncodedState = EncodedState
   { encodedRoot  :: Maybe (Ptr Closure, VacuumNode)
   , encodedStack :: [(Ptr Closure, VacuumNode)]
-  , encodedNodes :: Map (Ptr Closure) VacuumNode
+  , encodedNodes :: !(Map (Ptr Closure) VacuumNode)
   } deriving (Show, Generic)
 
 instance Binary EncodedState
