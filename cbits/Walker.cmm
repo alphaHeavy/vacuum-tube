@@ -1,6 +1,7 @@
 #include <Cmm.h>
 
-#define INPKG(a) vacuumzmtubezm0zi1zi0zi0_GHCziVacuumTubeziMorgue_ ## a
+// #define INPKG(a) vacuumzmtubezm0zi1zi0zi0_GHCziVacuumTubeziMorgue_ ## a
+#define INPKG(a) vacuuzuLIsuEH5apgaDq9q9kbey2g_GHCziVacuumTubeziMorgue_ ## a
 
 // VacuumWalker_getInfoTable :: Any -> State# s -> (# State# s, Addr# #)
 VacuumWalker_getInfoTable (P_ a)
