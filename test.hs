@@ -34,15 +34,12 @@ roundTrip f !val =
       val' = unVacuumTube $ runGet get bs
   in traceShow ("rt", f val, f val') (f val == f val')
 
-x :: Int -> Int -> Int
-x = (*)
-
 -- prop1 :: forall a proxy . Arbitrary a => proxy a -> Property
 -- prop1 _ = do
-prop1 :: Property
+prop1 :: Gen Property
 prop1 = do
   x <- arbitrary
-  property $ roundTrip id (x :: Integer)
+  return . property $ roundTrip id (x :: Integer)
 
 {-
 tests :: TestTree
